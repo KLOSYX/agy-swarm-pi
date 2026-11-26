@@ -168,6 +168,7 @@ test('only the panel selects a harness, active work blocks switches, and old boa
       const initial = (await call('pi_get_settings')).structuredContent.settings;
       const setCodex = () => call('app_save_settings', { settings: { ...initial, harness: 'codex' } });
       const boardArgs = { title: 'Swarm', cwd: dir, members: [{ name: 'worker' }] };
+      assert.deepEqual((await call('app_read_board')).structuredContent.boards, []);
       const piBoard = (await call('pi_create_swarm', boardArgs)).structuredContent;
       assert.equal(piBoard.harness, 'pi');
       const modelTools = (await client.listTools()).tools;
@@ -187,6 +188,7 @@ test('only the panel selects a harness, active work blocks switches, and old boa
       assert.equal(refused.isError, true);
       assert.match(refused.content[0].text, /This swarm uses pi/);
       assert.equal((await call('pi_create_swarm', boardArgs)).structuredContent.harness, 'codex');
+      assert.deepEqual((await call('app_read_board')).structuredContent.boards.map(({ harness }) => harness), ['codex', 'pi']);
       assert.equal((await call('pi_list_models')).isError, true);
       assert.equal((await call('app_refresh_models')).structuredContent.settings.harness, 'codex');
       const missing = await call('pi_submit_task', { prompt: 'Hello', cwd: dir });

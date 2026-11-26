@@ -376,7 +376,10 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
   }
 
   const readBoardShape = { boardId, after: z.number().int().nonnegative().optional() };
-  const readAppBoard = ({ boardId, after }) => ({ ...boards.read(boardId, after), boards: boards.list() });
+  const readAppBoard = ({ boardId, after }) => ({
+    ...(boardId ? boards.read(boardId, after) : {}),
+    boards: boards.list(),
+  });
   boardTool('pi_create_swarm', 'Create a shared Pi Swarm board and its named worker roster.', {
     title: z.string().trim().min(1).max(120),
     cwd: z.string(),
@@ -398,7 +401,8 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
     ({ boardId, after, waitMs }) => boards.waitForMessages(boardId, after, waitMs));
   boardTool('pi_swarm_close', 'Close an idle Pi Swarm and release its worktrees for cleanup.', { boardId },
     ({ boardId }) => boards.close(boardId));
-  boardTool('app_read_board', 'Read Pi Swarm board updates.', readBoardShape, readAppBoard, true);
+  boardTool('app_read_board', 'List swarms or read updates to a selected board.',
+    { ...readBoardShape, boardId: boardId.optional() }, readAppBoard, true);
   boardTool('app_post_board', 'Post a user message and wake or queue the named Pi worker.', postShape,
     ({ boardId, to, text }) => boards.post(boardId, 'user', to, text), true);
 

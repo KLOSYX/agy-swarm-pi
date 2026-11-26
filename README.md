@@ -60,7 +60,7 @@ You can also install the cloned plugin with the Antigravity CLI.
 agy plugin install ./agy-swarm-pi
 ```
 
-On Windows, run the Antigravity CLI command in PowerShell. Version 0.4.0 and later start the MCP server with `node` directly. If the side panel is missing after upgrading, refresh `swarm-pi_pi` or restart Antigravity and check that `node --version` works in a terminal launched from the same environment.
+On Windows, run the Antigravity CLI command in PowerShell. If Windows reports that the installed plugin is in use during an upgrade, quit Antigravity and retry. Version 0.4.0 and later start the MCP server with `node` directly. If the side panel is missing after upgrading, refresh `swarm-pi_pi` or restart Antigravity and check that `node --version` works in a terminal launched from the same environment.
 
 To remove a global installation, run the installed script with `--uninstall`.
 

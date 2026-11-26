@@ -313,13 +313,23 @@ function showBoardError(message: string) {
 
 async function refreshBoard() {
   const id = boardId;
-  if (!id || activeTab !== 'board') return;
+  if (activeTab !== 'board') return;
   try {
     const after = board?.id === id ? board.messages.at(-1)?.number || 0 : 0;
-    const result = await app.callServerTool({ name: 'app_read_board', arguments: { boardId: id, after } });
-    if (boardId !== id) return;
+    const result = await app.callServerTool({ name: 'app_read_board', arguments: id ? { boardId: id, after } : {} });
+    if (boardId !== id || activeTab !== 'board') return;
     if (result.isError) throw new Error(result.content.map((item) => 'text' in item ? item.text : '').join(' '));
-    if (result.structuredContent) updateBoardView(result.structuredContent as unknown as BoardView);
+    if (!result.structuredContent) return;
+    if (id) {
+      updateBoardView(result.structuredContent as unknown as BoardView);
+    } else {
+      const { boards } = result.structuredContent as { boards: BoardSummary[] };
+      if (state && boards.length) {
+        state.boards = boards;
+        boardId = boards[0].id;
+        render();
+      }
+    }
     if (!composing) showBoardError('');
   } catch (error) {
     if (boardId === id) showBoardError(error instanceof Error ? error.message : String(error));
@@ -330,8 +340,11 @@ async function refreshBoard() {
 
 function scheduleBoardRefresh() {
   if (boardTimer !== null) window.clearTimeout(boardTimer);
-  boardTimer = activeTab === 'board' && boardId
-    ? window.setTimeout(refreshBoard, board?.lastMessage && (board.messages.at(-1)?.number || 0) < board.lastMessage ? 50 : 2000)
+  const catchingUp = boardId && (
+    board?.id !== boardId || (board.messages.at(-1)?.number || 0) < board.lastMessage
+  );
+  boardTimer = activeTab === 'board'
+    ? window.setTimeout(refreshBoard, catchingUp ? 50 : 2000)
     : null;
 }
 

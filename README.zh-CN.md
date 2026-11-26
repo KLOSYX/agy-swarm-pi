@@ -63,7 +63,7 @@ git clone https://github.com/KLOSYX/agy-swarm-pi.git
 agy plugin install ./agy-swarm-pi
 ```
 
-在 Windows 上可在 PowerShell 中运行上面的 Antigravity CLI 安装命令。v0.4.0 起，MCP 服务由 `node` 直接启动。升级后如果侧边栏还没有入口，刷新 `swarm-pi_pi` 或重启 Antigravity，并确认同一环境可以运行 `node --version`。
+在 Windows 上可在 PowerShell 中运行上面的 Antigravity CLI 安装命令。如果升级时提示插件文件被占用，退出 Antigravity 后重试。v0.4.0 起，MCP 服务由 `node` 直接启动。升级后如果侧边栏还没有入口，刷新 `swarm-pi_pi` 或重启 Antigravity，并确认同一环境可以运行 `node --version`。
 
 卸载：
 
