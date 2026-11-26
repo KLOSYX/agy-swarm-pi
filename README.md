@@ -1,33 +1,32 @@
 # agy-swarm-pi (`swarm-pi`)
 
+English · [简体中文](https://github.com/KLOSYX/agy-swarm-pi/blob/main/README.zh-CN.md)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-在 **Google Antigravity** 中通过 `/swarm_pi` **直接并发调度外部 Pi**（`@mariozechner/pi-coding-agent`）执行编码、审查与调研任务——**零中间代理模型开销**，内置 Git Worktree 隔离、按角色模型/思考档位配置以及实时 **Pi Swarm 共享消息板**。
+Run named Pi workers in parallel from Google Antigravity with `/swarm_pi`. Workers coordinate on a shared message board, and you can send follow-up instructions from the Pi Swarm panel.
 
-## 特性
+## Features
 
-- **MCP 直调零代理层（`/swarm_pi`）**：由主对话直接调用 `swarm-pi_pi`（`pi_create_swarm` / `pi_swarm_post` / `pi_swarm_read`），不再额外消耗 `flash_lite` 等中间代理模型额度；免终端网络沙盒审批，具备 Fail-Closed 强熔断护栏。
-- **内置 Git Worktree 隔离**：`pi_submit_task(..., worktree: true)` 自动创建独立 worktree 与 `swarm-pi/*` 分支供并发写代码使用，完成后自动返回 `diff_stat` 与真实执行的 `actual_model`，并支持清理临时工作树。
-- **消息板、任务和设置面板（Pi Swarm）**：在 Antigravity 侧边栏或右上角 `+` 菜单打开 **Pi Swarm**，查看命名成员之间的消息、向成员追加指令，或查看并发 Pi 任务的实际模型、思考档位、工具调用、Worktree 变更与输出结果，并可在「模型与角色设置」页自定义全局默认与 `coder`/`verifier`/`researcher` 等角色预设。
-- **开箱即用零依赖**：仓库及 Release 包已内置打包好的单文件 MCP Server（`bin/server.bundle.mjs`）与单文件 MCP App UI（`ui/dist/settings.html`），目标机器无需执行 `npm install`，自动复用系统 Node.js 或 Antigravity 内置 `agy-node`。
+- **Direct MCP orchestration**. The main Antigravity conversation calls `swarm-pi_pi` to create a swarm, assign tasks, and read the board. Pi executes the tasks directly. If Pi is unavailable, the plugin reports the error.
+- **Named workers and shared messages**. Workers can hand off tasks with `@mentions`. Each worker keeps its Pi session and working directory for follow-ups. The panel also shows the actual model, thinking level, tool calls, and worktree changes.
+- **Git worktree isolation**. Give parallel writers separate worktrees and `swarm-pi/*` branches. Review the changes and clean up the worktrees when finished.
+- **Per-role settings**. Set a default Pi model and thinking level, then override them for roles such as coder, verifier, and researcher.
+- **Prebuilt plugin**. The repository and release archives include the MCP server and panel bundles. The plugin can run on system Node.js or Antigravity's bundled `agy-node`.
 
----
+## Prerequisites
 
-## 前置要求
-
-目标机器需安装 Pi CLI 并配置对应模型 Provider 凭证：
+Install the Pi CLI and configure credentials for your model provider.
 
 ```bash
 npm install -g @mariozechner/pi-coding-agent
 ```
 
----
+## Install
 
-## 快速安装
+### From a GitHub release
 
-### 方式一：从 GitHub Release 下载零依赖安装包
-
-从 [GitHub Releases](https://github.com/KLOSYX/agy-swarm-pi/releases) 下载对应版本的安装包。以下以 v0.3.0 为例。
+Download the version you want from [GitHub Releases](https://github.com/KLOSYX/agy-swarm-pi/releases). This example installs v0.3.0.
 
 ```bash
 curl -fsSLO https://github.com/KLOSYX/agy-swarm-pi/releases/download/v0.3.0/swarm-pi-v0.3.0.tar.gz
@@ -35,50 +34,47 @@ tar -xzf swarm-pi-v0.3.0.tar.gz
 ./swarm-pi/install.sh
 ```
 
-仅安装到某个项目工作区（`<repo>/.agents/plugins/swarm-pi`）：
+To install only in one project, use `--workspace`. This installs the plugin under `<repo>/.agents/plugins/swarm-pi`.
 
 ```bash
 ./swarm-pi/install.sh --workspace /path/to/your/repo
 ```
 
-### 方式二：直接 `git clone` 安装
+### From a clone
 
 ```bash
 git clone https://github.com/KLOSYX/agy-swarm-pi.git
 ./agy-swarm-pi/install.sh
 ```
 
-或使用 Antigravity CLI：
+You can also install the cloned plugin with the Antigravity CLI.
 
 ```bash
 agy plugin install ./agy-swarm-pi
 ```
 
-卸载：
+To remove a global installation, run the installed script with `--uninstall`.
 
 ```bash
 ~/.gemini/config/plugins/swarm-pi/install.sh --uninstall
 ```
 
----
+## Use Pi Swarm
 
-## 使用说明
+1. If Antigravity was open during installation, refresh the `swarm-pi_pi` MCP server or restart Antigravity.
+2. Open **Pi Swarm** from the sidebar or the conversation's **+** menu. In **模型与角色设置** (Model and role settings), detect Pi, refresh the model list, and save your settings.
+3. Run `/swarm_pi <your task>` in the main conversation. The coordinator creates the board, names the workers, and assigns tasks.
+4. Open **共享消息板** (Shared message board) to follow the conversation. To send a follow-up, select a worker, enter your instructions, and send them. An idle worker resumes its session immediately. A busy worker processes queued messages in order.
 
-1. 安装完成后，如客户端已打开，请在右上角 `... > MCP Servers` 刷新 `swarm-pi_pi`（或重启 Antigravity 窗口）。
-2. 在 Antigravity 侧边栏或对话右上角 `+` 菜单打开 **Pi Swarm**，切换到 **模型与角色设置**，点击 **检测 Pi / 刷新模型**，设置全局默认及按角色的模型与思考档位并保存。
-3. 在对话中输入 `/swarm_pi <你的任务>`，协调器创建消息板、添加命名成员并派发任务。在 **Pi Swarm > 共享消息板** 查看成员和消息，选择成员并发送追加指令。空闲成员会接着原 Pi 会话处理，工作中的成员会依次处理排队消息。
+Workers hand off work by including `SWARM_POST @worker message` in their final reply. The MCP server routes the message after that Pi turn finishes. Boards and queued messages live in the MCP process. Task logs and Pi session files are saved in the plugin data directory.
 
-Pi worker 通过最终回复中的 `SWARM_POST @成员 消息` 交接。每轮 Pi 执行结束后，MCP 服务负责按成员投递，保留该成员的会话及工作区。消息板和排队状态随 MCP 进程存活。任务日志与 Pi 会话文件保存在插件数据目录。
-
----
-
-## 本地开发与打包
+## Develop and package
 
 ```bash
 npm install
-npm run build      # 重新打包 ui/dist/settings.html 与 bin/server.bundle.mjs
-npm test           # 运行单元测试与集成测试
-npm run pack       # 生成 dist/swarm-pi-v*.zip 与 .tar.gz 及 sha256
+npm run build
+npm test
+npm run pack
 ```
 
-推送与插件版本一致的 `vX.Y.Z` 标签后，GitHub Actions 会构建并测试插件，校验两个安装包，然后将安装包及 SHA-256 校验文件发布到 GitHub Releases。
+`npm run pack` builds the bundles and writes ZIP and tar.gz archives with SHA-256 checksum files to `dist/`. Pushing a `vX.Y.Z` tag that matches the plugin version triggers GitHub Actions to build, test, verify, and publish the archives and checksums.
