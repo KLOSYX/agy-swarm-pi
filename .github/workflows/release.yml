@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: read
+
+concurrency: release-${{ github.ref }}
+
+jobs:
+  build:
+    if: ${{ !github.event.deleted }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Check release version
+        run: |
+          node --input-type=commonjs <<'NODE'
+          const assert = require('node:assert/strict');
+          const tag = process.env.GITHUB_REF_NAME;
+          assert.match(tag, /^v\d+\.\d+\.\d+$/);
+          for (const file of ['plugin.json', 'package.json', 'package-lock.json']) {
+            assert.equal('v' + require('./' + file).version, tag, file);
+          }
+          assert.equal('v' + require('./package-lock.json').packages[''].version, tag);
+          NODE
+      - run: npm ci
+      - run: npm run pack
+      - run: npm test
+      - name: Verify archives and checksums
+        working-directory: dist
+        run: |
+          base="swarm-pi-${GITHUB_REF_NAME}"
+          unzip -tq "${base}.zip"
+          tar -tzf "${base}.tar.gz" >/dev/null
+          shasum -a 256 -c "${base}.zip.sha256" "${base}.tar.gz.sha256"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: installers
+          path: |
+            dist/swarm-pi-${{ github.ref_name }}.zip*
+            dist/swarm-pi-${{ github.ref_name }}.tar.gz*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: installers
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          base="swarm-pi-${GITHUB_REF_NAME}"
+          shasum -a 256 -c "${base}.zip.sha256" "${base}.tar.gz.sha256"
+          gh release create "$GITHUB_REF_NAME" \
+            "${base}.zip" "${base}.zip.sha256" \
+            "${base}.tar.gz" "${base}.tar.gz.sha256" \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes

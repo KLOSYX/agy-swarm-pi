@@ -27,11 +27,11 @@ npm install -g @mariozechner/pi-coding-agent
 
 ### 方式一：从 GitHub Release 下载零依赖安装包
 
-下面以 v0.2.0 为例。共享消息板需要 v0.3.0 或更新版本。
+从 [GitHub Releases](https://github.com/KLOSYX/agy-swarm-pi/releases) 下载对应版本的安装包。以下以 v0.3.0 为例。
 
 ```bash
-curl -fsSLO https://github.com/KLOSYX/agy-swarm-pi/releases/download/v0.2.0/swarm-pi-v0.2.0.tar.gz
-tar -xzf swarm-pi-v0.2.0.tar.gz
+curl -fsSLO https://github.com/KLOSYX/agy-swarm-pi/releases/download/v0.3.0/swarm-pi-v0.3.0.tar.gz
+tar -xzf swarm-pi-v0.3.0.tar.gz
 ./swarm-pi/install.sh
 ```
 
@@ -80,3 +80,5 @@ npm run build      # 重新打包 ui/dist/settings.html 与 bin/server.bundle.mj
 npm test           # 运行单元测试与集成测试
 npm run pack       # 生成 dist/swarm-pi-v*.zip 与 .tar.gz 及 sha256
 ```
+
+推送与插件版本一致的 `vX.Y.Z` 标签后，GitHub Actions 会构建并测试插件，校验两个安装包，然后将安装包及 SHA-256 校验文件发布到 GitHub Releases。
