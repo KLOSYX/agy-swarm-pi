@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -74,6 +75,16 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
     path.join(PLUGIN_ROOT, 'ui', 'dist', 'settings.html');
 
   const settingsStore = new SettingsStore(resolvedDataDir);
+  const languagePath = path.join(resolvedDataDir, 'ui-language');
+
+  async function loadLanguage() {
+    try {
+      return (await fs.readFile(languagePath, 'utf8')).trim() === 'zh-CN' ? 'zh-CN' : 'en';
+    } catch (err) {
+      if (err.code === 'ENOENT') return 'en';
+      throw err;
+    }
+  }
   const taskManager = new PiTaskManager({
     dataDir: resolvedDataDir,
     settingsStore,
@@ -86,9 +97,10 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
   });
 
   async function buildAppState(extra = {}) {
-    const settings = await settingsStore.load();
+    const [settings, language] = await Promise.all([settingsStore.load(), loadLanguage()]);
     const piStatus = await resolvePiExecutable(settings.piPath);
     return {
+      language,
       settings,
       defaults: DEFAULT_SETTINGS,
       thinkingLevels: THINKING_LEVELS,
@@ -203,6 +215,29 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
       try {
         return jsonToolResult(await buildAppState());
       } catch (err) {
+        return errorToolResult(err);
+      }
+    },
+  );
+
+  registerAppTool(
+    server,
+    'app_set_language',
+    {
+      title: 'Set Pi Swarm Panel Language',
+      description: 'Save the display language for the Pi Swarm panel.',
+      inputSchema: { language: z.enum(['en', 'zh-CN']) },
+      _meta: { ui: { visibility: ['app'] } },
+    },
+    async ({ language }) => {
+      const temporaryPath = `${languagePath}.${randomUUID()}.tmp`;
+      try {
+        await fs.mkdir(resolvedDataDir, { recursive: true });
+        await fs.writeFile(temporaryPath, `${language}\n`, { mode: 0o600 });
+        await fs.rename(temporaryPath, languagePath);
+        return jsonToolResult({ language });
+      } catch (err) {
+        await fs.rm(temporaryPath, { force: true }).catch(() => {});
         return errorToolResult(err);
       }
     },

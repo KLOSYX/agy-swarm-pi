@@ -23,11 +23,11 @@ async function build() {
 
   const js = result.outputFiles[0].text;
   const html = `<!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Pi Swarm 设置</title>
+  <title>Pi Swarm</title>
   <style>${css}</style>
 </head>
 <body>

@@ -59,6 +59,7 @@ body {
 
 .tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   border-bottom: 1px solid var(--border);
   padding-bottom: 8px;
@@ -398,4 +399,20 @@ details summary {
 
 #board-post-status:empty {
   display: none;
+}
+
+.header-actions,
+.language-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-actions {
+  flex-wrap: wrap;
+}
+
+.language-picker select {
+  width: auto;
+  padding: 4px 7px;
 }

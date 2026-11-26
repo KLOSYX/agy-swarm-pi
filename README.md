@@ -62,9 +62,9 @@ To remove a global installation, run the installed script with `--uninstall`.
 ## Use Pi Swarm
 
 1. If Antigravity was open during installation, refresh the `swarm-pi_pi` MCP server or restart Antigravity.
-2. Open **Pi Swarm** from the sidebar or the conversation's **+** menu. In **模型与角色设置** (Model and role settings), detect Pi, refresh the model list, and save your settings.
+2. Open **Pi Swarm** from the sidebar or the conversation's **+** menu. The panel opens in English by default. Choose **简体中文** from **Language** if you prefer. In **Model and role settings**, detect Pi, refresh the model list, and save your settings.
 3. Run `/swarm_pi <your task>` in the main conversation. The coordinator creates the board, names the workers, and assigns tasks.
-4. Open **共享消息板** (Shared message board) to follow the conversation. To send a follow-up, select a worker, enter your instructions, and send them. An idle worker resumes its session immediately. A busy worker processes queued messages in order.
+4. Open **Shared message board** to follow the conversation. To send a follow-up, select a worker, enter your instructions, and send them. An idle worker resumes its session immediately. A busy worker processes queued messages in order.
 
 Workers hand off work by including `SWARM_POST @worker message` in their final reply. The MCP server routes the message after that Pi turn finishes. Boards and queued messages live in the MCP process. Task logs and Pi session files are saved in the plugin data directory.
 

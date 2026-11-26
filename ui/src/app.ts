@@ -3,6 +3,7 @@ import {
   applyDocumentTheme,
   applyHostStyleVariables,
 } from '@modelcontextprotocol/ext-apps';
+import { panelText, thinkingLabel, type Language } from './locale';
 
 interface Profile {
   model: string;
@@ -84,6 +85,7 @@ interface BoardView extends Board {
 }
 
 interface AppState {
+  language?: Language;
   settings: Settings;
   defaults: Settings;
   thinkingLevels: string[];
@@ -105,6 +107,10 @@ const root = document.getElementById('app') as HTMLElement;
 const app = new App({ name: 'Pi Swarm', version: '0.3.0' }, {});
 
 let state: AppState | null = null;
+let language: Language = 'en';
+let labels = panelText.en;
+let savingLanguage = false;
+
 let draft: Settings | null = null;
 let activeTab: Tab = 'settings';
 let boardId = '';
@@ -119,6 +125,12 @@ let banner = '';
 let bannerKind: 'ok' | 'warn' | 'error' = 'ok';
 let newRoleName = '';
 let pollTimer: number | null = null;
+
+function useLanguage(value: Language) {
+  language = value;
+  labels = panelText[value];
+  document.documentElement.lang = value;
+}
 
 function setBanner(text: string, kind: 'ok' | 'warn' | 'error' = 'ok') {
   banner = text;
@@ -153,6 +165,7 @@ function scheduleAutoRefresh() {
 }
 
 function applyIncomingState(nextState: AppState, resetDraft = false) {
+  if (!state) useLanguage(nextState.language === 'zh-CN' ? 'zh-CN' : 'en');
   state = nextState;
   if (!draft || resetDraft) {
     draft = structuredClone(nextState.settings);
@@ -196,15 +209,13 @@ function formatDuration(ms: number): string {
 function markDirty() {
   dirty = true;
   const indicator = document.getElementById('dirty-indicator');
-  if (indicator) indicator.textContent = '有未保存的更改';
+  if (indicator) indicator.textContent = labels.unsavedChanges;
 }
-
-const memberStatus = { waiting: '待命', working: '处理中', blocked: '受阻' };
 
 function renderBoardFeed(current: Board): string {
   const members = current.members.map((member) => `
     <li><b>@${escapeHtml(member.name)}</b>
-      <span>${memberStatus[member.status]}${member.queued ? ` · 排队 ${member.queued}` : ''}</span>
+      <span>${labels[member.status]}${member.queued ? ` · ${labels.queued(member.queued)}` : ''}</span>
       ${member.actualModel ? ` <small>${escapeHtml(member.actualModel)}</small>` : ''}
     </li>`).join('');
   const messages = current.messages.map((message) => `
@@ -212,43 +223,43 @@ function renderBoardFeed(current: Board): string {
       <div><b>@${escapeHtml(message.from)}</b>
         ${message.to ? ` → @${escapeHtml(message.to)}` : ''}
         <span class="hint">#${message.number}
-          ${message.replyTo ? ` · 回复 #${message.replyTo}` : ''}
-          · ${escapeHtml(new Date(message.time).toLocaleTimeString())}
+          ${message.replyTo ? ` · ${labels.replyTo(message.replyTo)}` : ''}
+          · ${escapeHtml(new Date(message.time).toLocaleTimeString(language))}
         </span>
       </div>
-      <div class="board-message-text">${escapeHtml(message.text || '已提交交接消息')}</div>
+      <div class="board-message-text">${escapeHtml(message.text || labels.handoffPosted)}</div>
       ${message.logPath ? `<small class="mono">${escapeHtml(message.logPath)}</small>` : ''}
     </li>`).join('');
-  return `<ul class="board-members" aria-label="成员">${members}</ul>
-    <ol class="board-messages" aria-label="共享消息">${messages || '<li>暂无消息</li>'}</ol>`;
+  return `<ul class="board-members" aria-label="${labels.members}">${members}</ul>
+    <ol class="board-messages" aria-label="${labels.board}">${messages || `<li>${labels.noMessages}</li>`}</ol>`;
 }
 
 function boardOptions(boards: BoardSummary[]): string {
   return boards.map(({ id, title, closed }) =>
-    `<option value="${escapeHtml(id)}" ${id === boardId ? 'selected' : ''}>${escapeHtml(title)}${closed ? ' · 已关闭' : ''}</option>`,
+    `<option value="${escapeHtml(id)}" ${id === boardId ? 'selected' : ''}>${escapeHtml(title)}${closed ? ` · ${labels.closed}` : ''}</option>`,
   ).join('');
 }
 
 function renderBoardTab(current: AppState): string {
   if (!current.boards.length) {
-    return '<div class="card">在主对话运行 /swarm_pi 创建共享消息板。</div>';
+    return `<div class="card">${labels.noBoard}</div>`;
   }
   const selected = board?.id === boardId ? board : null;
   return `<div class="card">
-    <label for="board-select">Swarm</label>
+    <label for="board-select">${labels.swarm}</label>
     <select id="board-select">
       ${boardOptions(current.boards)}
     </select>
     <div id="board-error" role="status">${escapeHtml(boardError)}</div>
-    <div id="board-feed">${selected ? renderBoardFeed(selected) : '正在加载消息…'}</div>
+    <div id="board-feed">${selected ? renderBoardFeed(selected) : labels.loadingMessages}</div>
     ${selected && !selected.closed ? `<form id="board-form">
-      <label for="board-recipient">发送给</label>
+      <label for="board-recipient">${labels.recipient}</label>
       <select id="board-recipient">
         ${selected.members.map(({name}) => `<option value="${escapeHtml(name)}">@${escapeHtml(name)}</option>`).join('')}
       </select>
-      <label for="board-instruction">追加指令</label>
+      <label for="board-instruction">${labels.instruction}</label>
       <textarea id="board-instruction" required maxlength="4000" rows="3"></textarea>
-      <button class="btn primary" type="submit">发送指令</button>
+      <button class="btn primary" type="submit" ${savingLanguage ? 'disabled' : ''}>${labels.sendInstruction}</button>
       <output id="board-post-status" aria-live="polite"></output>
     </form>` : ''}
   </div>`;
@@ -315,9 +326,8 @@ function renderTasksTab(current: AppState): string {
     return `
       <div class="card">
         <div class="empty-state">
-          <div style="font-weight:600;margin-bottom:6px;">暂无 Pi 任务</div>
-          <button id="btn-refresh-tasks" type="button" class="btn sm">刷新状态</button>
-          <div class="hint">在对话中输入 <span class="mono">/swarm_pi &lt;任务&gt;</span> 后，所有并行运行的 Pi 任务、实际模型、工具调用与 Worktree 变更会实时显示在这里。</div>
+          <div style="font-weight:600;margin-bottom:6px;">${labels.noTasks}</div>
+          <button id="btn-refresh-tasks" type="button" class="btn sm">${labels.refreshTasks}</button>
         </div>
       </div>`;
   }
@@ -325,14 +335,14 @@ function renderTasksTab(current: AppState): string {
   return `
     <div class="card">
       <div class="card-header">
-        <span class="card-title">Pi 并发任务看板（共 ${tasks.length} 条）</span>
-        <button id="btn-refresh-tasks" type="button" class="btn sm" ${busy ? 'disabled' : ''}>刷新状态</button>
+        <span class="card-title">${labels.taskCount(tasks.length)}</span>
+        <button id="btn-refresh-tasks" type="button" class="btn sm" ${busy ? 'disabled' : ''}>${labels.refreshTasks}</button>
       </div>
       ${tasks
         .map((t) => {
           const displayTitle = t.label || t.task_id;
-          const configuredModel = t.profile.model || '(pi default)';
-          const actualModel = t.actual_model || (t.status === 'running' ? '启动中...' : '未上报');
+          const configuredModel = t.profile.model || labels.piDefault;
+          const actualModel = t.actual_model || (t.status === 'running' ? labels.starting : labels.modelNotReported);
           const toolCounts = t.tool_calls.reduce<Record<string, number>>((acc, name) => {
             acc[name] = (acc[name] || 0) + 1;
             return acc;
@@ -345,29 +355,29 @@ function renderTasksTab(current: AppState): string {
             <div class="task-card">
               <div class="card-header">
                 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                  <span class="role-badge">${escapeHtml(t.profile.role || 'default')}</span>
+                  <span class="role-badge">${escapeHtml(t.profile.role || labels.defaultRole)}</span>
                   <strong>${escapeHtml(displayTitle)}</strong>
                   <span class="hint mono">${escapeHtml(t.task_id)}</span>
                 </div>
                 <div style="display:flex;align-items:center;gap:6px;">
-                  <span class="status-pill ${escapeHtml(t.status)}">${escapeHtml(t.status)} · ${formatDuration(t.elapsed_ms)}</span>
+                  <span class="status-pill ${escapeHtml(t.status)}">${labels[t.status]} · ${formatDuration(t.elapsed_ms)}</span>
                   ${
                     t.status === 'running'
-                      ? `<button type="button" class="btn sm danger" data-cancel-task="${escapeHtml(t.task_id)}" ${busy ? 'disabled' : ''}>中止</button>`
+                      ? `<button type="button" class="btn sm danger" data-cancel-task="${escapeHtml(t.task_id)}" ${busy ? 'disabled' : ''}>${labels.cancel}</button>`
                       : ''
                   }
                   ${
                     t.status !== 'running' && t.worktree?.enabled && !t.worktree.cleaned
-                      ? `<button type="button" class="btn sm" data-cleanup-wt="${escapeHtml(t.task_id)}" ${busy ? 'disabled' : ''}>清理 Worktree</button>`
+                      ? `<button type="button" class="btn sm" data-cleanup-wt="${escapeHtml(t.task_id)}" ${busy ? 'disabled' : ''}>${labels.cleanWorktree}</button>`
                       : ''
                   }
                 </div>
               </div>
 
               <div class="meta-row">
-                <span>配置模型：<span class="mono">${escapeHtml(configuredModel)}</span></span>
-                <span>实际模型：<strong class="mono">${escapeHtml(actualModel)}</strong></span>
-                <span>思考：<span class="mono">${escapeHtml(t.profile.thinking)}</span></span>
+                <span>${labels.configuredModel}: <span class="mono">${escapeHtml(configuredModel)}</span></span>
+                <span>${labels.actualModel}: <strong class="mono">${escapeHtml(actualModel)}</strong></span>
+                <span>${labels.thinking}: <span class="mono">${escapeHtml(thinkingLabel(language, t.profile.thinking))}</span></span>
               </div>
 
               ${
@@ -376,20 +386,20 @@ function renderTasksTab(current: AppState): string {
                   : ''
               }
 
-              ${toolChips ? `<div class="meta-row">工具调用：${toolChips}</div>` : ''}
+              ${toolChips ? `<div class="meta-row">${labels.toolCalls}: ${toolChips}</div>` : ''}
 
               ${
                 t.worktree?.enabled
                   ? `<div class="hint">
-                      Worktree 分支：<span class="mono">${escapeHtml(t.worktree.branch)}</span>
-                      ${t.worktree.cleaned ? '（已清理）' : `· 路径：<span class="mono">${escapeHtml(t.worktree.path)}</span>`}
+                      ${labels.worktreeBranch}: <span class="mono">${escapeHtml(t.worktree.branch)}</span>
+                      ${t.worktree.cleaned ? `(${labels.worktreeCleaned})` : `· ${labels.path}: <span class="mono">${escapeHtml(t.worktree.path)}</span>`}
                     </div>`
                   : ''
               }
 
               ${
                 t.worktree?.diff_stat
-                  ? `<details><summary>Worktree Diff 概览</summary><pre class="output-box">${escapeHtml(t.worktree.diff_stat)}</pre></details>`
+                  ? `<details><summary>${labels.worktreeDiff}</summary><pre class="output-box">${escapeHtml(t.worktree.diff_stat)}</pre></details>`
                   : ''
               }
 
@@ -397,7 +407,7 @@ function renderTasksTab(current: AppState): string {
                 t.error_text
                   ? `<pre class="output-box" style="color:var(--danger)">${escapeHtml(t.error_text)}</pre>`
                   : t.result_text
-                    ? `<details ${t.status === 'completed' ? 'open' : ''}><summary>输出结果</summary><pre class="output-box">${escapeHtml(t.result_text)}</pre></details>`
+                    ? `<details ${t.status === 'completed' ? 'open' : ''}><summary>${labels.result}</summary><pre class="output-box">${escapeHtml(t.result_text)}</pre></details>`
                     : ''
               }
             </div>`;
@@ -417,26 +427,26 @@ function renderSettingsTab(current: AppState, currentDraft: Settings): string {
 
     <div class="card">
       <div class="card-header">
-        <span class="card-title">全局默认配置（Default）</span>
+        <span class="card-title">${labels.globalDefaults}</span>
       </div>
       <div class="grid-2">
         <div class="field">
-          <label for="pi-path">pi 可执行路径（auto 或绝对路径）</label>
+          <label for="pi-path">${labels.piExecutable}</label>
           <input id="pi-path" type="text" value="${escapeHtml(currentDraft.piPath)}" placeholder="auto" />
         </div>
         <div class="field">
-          <label for="def-model">默认模型（留空则沿用 pi 默认模型）</label>
-          <input id="def-model" type="text" list="pi-models-datalist" value="${escapeHtml(currentDraft.default.model)}" placeholder="例如 anthropic/claude-sonnet-4-5" />
+          <label for="def-model">${labels.defaultModel}</label>
+          <input id="def-model" type="text" list="pi-models-datalist" value="${escapeHtml(currentDraft.default.model)}" placeholder="${labels.exampleModel}" />
         </div>
       </div>
       <div class="field">
-        <label>默认思考档位（--thinking）</label>
+        <label>${labels.defaultThinking}</label>
         <div class="segmented" id="def-thinking-group">
           ${current.thinkingLevels
             .map(
               (lvl) => `
             <button type="button" class="seg-btn ${currentDraft.default.thinking === lvl ? 'active' : ''}" data-def-thinking="${lvl}">
-              ${lvl}
+              ${escapeHtml(thinkingLabel(language, lvl))}
             </button>`,
             )
             .join('')}
@@ -444,11 +454,11 @@ function renderSettingsTab(current: AppState, currentDraft: Settings): string {
       </div>
       <div class="grid-2">
         <div class="field">
-          <label for="def-tools">默认工具白名单（--tools）</label>
+          <label for="def-tools">${labels.defaultTools}</label>
           <input id="def-tools" type="text" value="${escapeHtml(currentDraft.default.tools)}" placeholder="read,write,edit,bash" />
         </div>
         <div class="field">
-          <label for="def-timeout">默认超时（秒，10–7200）</label>
+          <label for="def-timeout">${labels.defaultTimeout}</label>
           <input id="def-timeout" type="number" min="10" max="7200" value="${currentDraft.default.timeoutSec ?? 900}" />
         </div>
       </div>
@@ -456,8 +466,8 @@ function renderSettingsTab(current: AppState, currentDraft: Settings): string {
 
     <div class="card">
       <div class="card-header">
-        <span class="card-title">按角色预设覆盖（Roles）</span>
-        <span class="hint">留空模型或选 inherit 时继承全局默认</span>
+        <span class="card-title">${labels.roles}</span>
+        <span class="hint">${labels.roleHelp}</span>
       </div>
 
       ${roleEntries
@@ -466,31 +476,31 @@ function renderSettingsTab(current: AppState, currentDraft: Settings): string {
         <div class="role-card" data-role="${escapeHtml(roleName)}">
           <div class="card-header">
             <span class="role-badge">${escapeHtml(roleName)}</span>
-            <button type="button" class="btn sm danger" data-delete-role="${escapeHtml(roleName)}">删除角色</button>
+            <button type="button" class="btn sm danger" data-delete-role="${escapeHtml(roleName)}">${labels.deleteRole}</button>
           </div>
           <div class="grid-2">
             <div class="field">
-              <label>模型（覆盖全局）</label>
-              <input type="text" list="pi-models-datalist" data-role-field="model" data-role-name="${escapeHtml(roleName)}" value="${escapeHtml(role.model || '')}" placeholder="留空继承全局默认" />
+              <label>${labels.roleModel}</label>
+              <input type="text" list="pi-models-datalist" data-role-field="model" data-role-name="${escapeHtml(roleName)}" value="${escapeHtml(role.model || '')}" placeholder="${labels.inheritDefault}" />
             </div>
             <div class="field">
-              <label>思考档位（--thinking）</label>
+              <label>${labels.roleThinking}</label>
               <select data-role-field="thinking" data-role-name="${escapeHtml(roleName)}">
                 ${current.roleThinkingOptions
                   .map(
                     (lvl) =>
-                      `<option value="${lvl}" ${role.thinking === lvl ? 'selected' : ''}>${lvl}</option>`,
+                      `<option value="${lvl}" ${role.thinking === lvl ? 'selected' : ''}>${escapeHtml(thinkingLabel(language, lvl))}</option>`,
                   )
                   .join('')}
               </select>
             </div>
             <div class="field">
-              <label>工具白名单（--tools）</label>
-              <input type="text" data-role-field="tools" data-role-name="${escapeHtml(roleName)}" value="${escapeHtml(role.tools || '')}" placeholder="留空继承全局默认" />
+              <label>${labels.roleTools}</label>
+              <input type="text" data-role-field="tools" data-role-name="${escapeHtml(roleName)}" value="${escapeHtml(role.tools || '')}" placeholder="${labels.inheritDefault}" />
             </div>
             <div class="field">
-              <label>超时（秒，留空继承）</label>
-              <input type="number" min="10" max="7200" data-role-field="timeoutSec" data-role-name="${escapeHtml(roleName)}" value="${role.timeoutSec ?? ''}" placeholder="继承全局" />
+              <label>${labels.roleTimeout}</label>
+              <input type="number" min="10" max="7200" data-role-field="timeoutSec" data-role-name="${escapeHtml(roleName)}" value="${role.timeoutSec ?? ''}" placeholder="${labels.inheritDefault}" />
             </div>
           </div>
         </div>`,
@@ -498,15 +508,15 @@ function renderSettingsTab(current: AppState, currentDraft: Settings): string {
         .join('')}
 
       <div class="add-role-row">
-        <input id="new-role-name" type="text" value="${escapeHtml(newRoleName)}" placeholder="新增角色名（小写字母/数字/_/-，如 architect）" />
-        <button id="btn-add-role" type="button" class="btn">新增角色</button>
+        <input id="new-role-name" type="text" value="${escapeHtml(newRoleName)}" placeholder="${labels.roleName}" />
+        <button id="btn-add-role" type="button" class="btn">${labels.addRole}</button>
       </div>
     </div>`;
 }
 
 function render() {
   if (!state || !draft) {
-    root.innerHTML = `<div class="container"><div class="card">正在加载 Pi Swarm 面板...</div></div>`;
+    root.innerHTML = `<div class="container"><div class="card">${labels.loadingPanel}</div></div>`;
     return;
   }
 
@@ -518,46 +528,55 @@ function render() {
     <div class="container">
       <div class="header">
         <div class="title-group">
-          <h1>Pi Swarm（/swarm_pi）</h1>
-          <p class="subtitle">MCP 直调外部 Pi · 零中间代理 · 支持独立 Worktree 与角色预设</p>
+          <h1>Pi Swarm (/swarm_pi)</h1>
+          <p class="subtitle">${labels.subtitle}</p>
         </div>
-        <button id="btn-refresh-models" class="btn sm" ${busy ? 'disabled' : ''}>
-          ${busy ? '处理中...' : '检测 Pi / 刷新模型'}
-        </button>
+        <div class="header-actions">
+          <label class="language-picker" for="panel-language">
+            <span>${labels.language}</span>
+            <select id="panel-language" ${savingLanguage ? 'disabled' : ''}>
+              <option value="en" lang="en" ${language === 'en' ? 'selected' : ''}>English</option>
+              <option value="zh-CN" lang="zh-CN" ${language === 'zh-CN' ? 'selected' : ''}>简体中文</option>
+            </select>
+          </label>
+          <button id="btn-refresh-models" class="btn sm" ${busy ? 'disabled' : ''}>
+            ${busy ? labels.checkingPi : labels.detectPi}
+          </button>
+        </div>
       </div>
 
       <div class="tabs">
-        <button type="button" class="tab-btn ${activeTab === 'board' ? 'active' : ''}" data-tab="board">共享消息板</button>
+        <button type="button" class="tab-btn ${activeTab === 'board' ? 'active' : ''}" data-tab="board">${labels.board}</button>
         <button type="button" class="tab-btn ${activeTab === 'tasks' ? 'active' : ''}" data-tab="tasks">
-          任务看板
+          ${labels.tasks}
           <span class="badge ${runningCount > 0 ? 'running' : ''}">
-            ${runningCount > 0 ? `${runningCount} 运行中` : state.recentTasks.length}
+            ${runningCount > 0 ? labels.runningCount(runningCount) : state.recentTasks.length}
           </span>
         </button>
         <button type="button" class="tab-btn ${activeTab === 'settings' ? 'active' : ''}" data-tab="settings">
-          模型与角色设置
-          ${dirty ? '<span class="badge">未保存</span>' : ''}
+          ${labels.settings}
+          ${dirty ? `<span class="badge">${labels.unsaved}</span>` : ''}
         </button>
       </div>
 
       <div class="card">
         <div class="card-header">
-          <span class="card-title">运行环境</span>
+          <span class="card-title">${labels.environment}</span>
           <span class="status-pill ${piOk ? 'ok' : 'warn'}">
-            ${piOk ? `pi: <span class="mono">${escapeHtml(state.piStatus.path || '')}</span>` : '未检测到 pi 可执行文件'}
+            ${piOk ? `pi: <span class="mono">${escapeHtml(state.piStatus.path || '')}</span>` : labels.missingPi}
           </span>
         </div>
         ${
           !piOk
-            ? `<div class="hint">请先安装 <span class="mono">npm i -g @mariozechner/pi-coding-agent</span> 或在设置中填写 <span class="mono">piPath</span>。</div>`
+            ? `<div class="hint">${labels.installPi}</div>`
             : ''
         }
         ${
           state.modelsCache.error
-            ? `<div class="hint" style="color:var(--warn)">模型列表刷新提示：${escapeHtml(state.modelsCache.error)}</div>`
+            ? `<div class="hint" style="color:var(--warn)">${labels.modelRefresh}: ${escapeHtml(state.modelsCache.error)}</div>`
             : models.length > 0
-              ? `<div class="hint">已缓存 ${models.length} 个可用模型 · 配置文件：<span class="mono">${escapeHtml(state.settingsPath)}</span></div>`
-              : `<div class="hint">配置文件：<span class="mono">${escapeHtml(state.settingsPath)}</span></div>`
+              ? `<div class="hint">${labels.cachedModels(models.length)} · ${labels.settingsFile}: <span class="mono">${escapeHtml(state.settingsPath)}</span></div>`
+              : `<div class="hint">${labels.settingsFile}: <span class="mono">${escapeHtml(state.settingsPath)}</span></div>`
         }
         ${
           banner
@@ -572,10 +591,10 @@ function render() {
     ${
       activeTab === 'settings'
         ? `<div class="footer-bar">
-            <span id="dirty-indicator" class="hint">${dirty ? '有未保存的更改' : '配置已同步'}</span>
+            <span id="dirty-indicator" class="hint">${dirty ? labels.unsavedChanges : labels.settingsSynced}</span>
             <div class="footer-actions">
-              <button id="btn-reset-defaults" type="button" class="btn" ${busy ? 'disabled' : ''}>恢复默认</button>
-              <button id="btn-save" type="button" class="btn primary" ${busy ? 'disabled' : ''}>保存设置</button>
+              <button id="btn-reset-defaults" type="button" class="btn" ${busy ? 'disabled' : ''}>${labels.resetDefaults}</button>
+              <button id="btn-save" type="button" class="btn primary" ${busy ? 'disabled' : ''}>${labels.saveSettings}</button>
             </div>
           </div>`
         : ''
@@ -598,7 +617,44 @@ async function refreshTasks() {
   }
 }
 
+async function changeLanguage(select: HTMLSelectElement) {
+  const next = select.value as Language;
+  if (savingLanguage || composing || next === language) {
+    select.value = language;
+    return;
+  }
+  savingLanguage = true;
+  select.disabled = true;
+  const submit = document.querySelector<HTMLButtonElement>('#board-form button[type=submit]');
+  if (submit) submit.disabled = true;
+  let error: string | null = null;
+  try {
+    const result = await app.callServerTool({ name: 'app_set_language', arguments: { language: next } });
+    if (result.isError) throw new Error(result.content.map((item) => 'text' in item ? item.text : '').join(' '));
+    useLanguage(next);
+    banner = '';
+  } catch (err) {
+    error = err instanceof Error ? err.message : String(err);
+  } finally {
+    savingLanguage = false;
+    const instruction = document.querySelector<HTMLTextAreaElement>('#board-instruction')?.value;
+    const recipient = document.querySelector<HTMLSelectElement>('#board-recipient')?.value;
+    const focused = select.isConnected
+      && (document.activeElement === select || document.activeElement === document.body);
+    if (error) setBanner(`${labels.languageFailed}: ${error}`, 'error');
+    else render();
+    const instructionInput = document.querySelector<HTMLTextAreaElement>('#board-instruction');
+    const recipientInput = document.querySelector<HTMLSelectElement>('#board-recipient');
+    if (instructionInput && instruction !== undefined) instructionInput.value = instruction;
+    if (recipientInput && recipient !== undefined) recipientInput.value = recipient;
+    if (focused) document.getElementById('panel-language')?.focus();
+  }
+}
+
 function bindEvents() {
+  const languageSelect = document.getElementById('panel-language') as HTMLSelectElement | null;
+  languageSelect?.addEventListener('change', () => void changeLanguage(languageSelect));
+
   const boardSelect = document.getElementById('board-select') as HTMLSelectElement | null;
   boardSelect?.addEventListener('change', () => {
     boardId = boardSelect.value;
@@ -611,7 +667,7 @@ function bindEvents() {
   const form = document.getElementById('board-form') as HTMLFormElement | null;
   form?.addEventListener('submit', async (event) => {
     event.preventDefault();
-    if (composing) return;
+    if (composing || savingLanguage) return;
     const input = form.querySelector<HTMLTextAreaElement>('#board-instruction')!;
     const recipient = form.querySelector<HTMLSelectElement>('#board-recipient')!;
     const text = input.value.trim();
@@ -619,7 +675,7 @@ function bindEvents() {
     if (!text) return;
     composing = true;
     const status = form.querySelector<HTMLOutputElement>('#board-post-status')!;
-    status.value = '正在发送…';
+    status.value = labels.sending;
     try {
       const result = await app.callServerTool({
         name: 'app_post_board', arguments: { boardId: id, to: recipient.value, text },
@@ -627,7 +683,7 @@ function bindEvents() {
       if (boardId !== id) return;
       if (result.isError) throw new Error(result.content.map((item) => 'text' in item ? item.text : '').join(' '));
       if (input.value.trim() === text) input.value = '';
-      status.value = '指令已发布';
+      status.value = labels.instructionPosted;
       await refreshBoard();
     } catch (error) {
       status.value = error instanceof Error ? error.message : String(error);
@@ -686,7 +742,7 @@ function bindEvents() {
         });
         if (res.structuredContent) {
           applyIncomingState(res.structuredContent as unknown as AppState, false);
-          setBanner(`已中止任务 ${taskId}。`, 'warn');
+          setBanner(labels.taskCancelled(taskId), 'warn');
         }
       } catch (err) {
         setBanner(err instanceof Error ? err.message : String(err), 'error');
@@ -711,7 +767,7 @@ function bindEvents() {
         if (res.isError) throw new Error(res.content.map((item) => 'text' in item ? item.text : '').join(' '));
         if (res.structuredContent) {
           applyIncomingState(res.structuredContent as unknown as AppState, false);
-          setBanner(`已清理任务 ${taskId} 的 Worktree 目录（分支已保留）。`, 'ok');
+          setBanner(labels.worktreeRemoved(taskId), 'ok');
         }
       } catch (err) {
         setBanner(err instanceof Error ? err.message : String(err), 'error');
@@ -801,11 +857,11 @@ function bindEvents() {
     if (!draft) return;
     const clean = newRoleName.trim().toLowerCase();
     if (!/^[a-z0-9_-]{1,32}$/.test(clean)) {
-      setBanner('角色名需为 1-32 位小写字母、数字、下划线或连字符。', 'error');
+      setBanner(labels.invalidRole, 'error');
       return;
     }
     if (draft.roles[clean]) {
-      setBanner(`角色 "${clean}" 已存在。`, 'warn');
+      setBanner(labels.duplicateRole(clean), 'warn');
       return;
     }
     draft.roles[clean] = {
@@ -824,7 +880,7 @@ function bindEvents() {
     if (!state) return;
     draft = structuredClone(state.defaults);
     dirty = true;
-    setBanner('已恢复为默认模板，点击“保存设置”后生效。', 'warn');
+    setBanner(labels.defaultsRestored, 'warn');
   });
 
   document.getElementById('btn-save')?.addEventListener('click', async () => {
@@ -838,11 +894,11 @@ function bindEvents() {
         arguments: { settings: draft },
       });
       if (res.isError) {
-        const msg = res.content?.map((c) => ('text' in c ? c.text : '')).join('\n') || '保存失败';
+        const msg = res.content?.map((c) => ('text' in c ? c.text : '')).join('\n') || labels.saveFailed;
         setBanner(msg, 'error');
       } else if (res.structuredContent) {
         applyIncomingState(res.structuredContent as unknown as AppState, true);
-        setBanner('设置已保存并立即生效。', 'ok');
+        setBanner(labels.settingsSaved, 'ok');
       }
     } catch (err) {
       setBanner(err instanceof Error ? err.message : String(err), 'error');
@@ -854,7 +910,7 @@ function bindEvents() {
 }
 
 app.ontoolresult = (result) => {
-  if (result?.structuredContent) {
+  if (result?.structuredContent?.settings) {
     applyIncomingState(result.structuredContent as unknown as AppState, !dirty);
   }
 };
@@ -880,5 +936,5 @@ async function init() {
 }
 
 init().catch((err) => {
-  root.innerHTML = `<div class="container"><div class="card">初始化失败：${escapeHtml(err instanceof Error ? err.message : String(err))}</div></div>`;
+  root.innerHTML = `<div class="container"><div class="card">${labels.initFailed}: ${escapeHtml(err instanceof Error ? err.message : String(err))}</div></div>`;
 });

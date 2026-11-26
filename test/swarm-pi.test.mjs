@@ -300,6 +300,7 @@ test('MCP server exposes task tools and serves the bundled Pi Swarm MCP App', as
     for (const expected of [
       'open_pi_swarm_settings',
       'app_get_state',
+      'app_set_language',
       'app_save_settings',
       'app_refresh_models',
       'app_cancel_task',
@@ -318,6 +319,8 @@ test('MCP server exposes task tools and serves the bundled Pi Swarm MCP App', as
 
     const res = await client.readResource({ uri: 'ui://swarm-pi/settings.html' });
     assert.equal(res.contents[0].mimeType, 'text/html;profile=mcp-app');
+    assert.ok(res.contents[0].text.includes('<html lang="en">'));
+    assert.ok(res.contents[0].text.includes('Shared message board'));
     assert.ok(res.contents[0].text.includes('任务看板'));
     assert.ok(res.contents[0].text.includes('共享消息板'));
     assert.ok(Buffer.byteLength(res.contents[0].text, 'utf8') < 10 * 1024 * 1024);
@@ -330,5 +333,42 @@ test('MCP server exposes task tools and serves the bundled Pi Swarm MCP App', as
 
     await client.close();
     await server.close();
+  });
+});
+
+
+test('panel language defaults to English and survives reconnects independently of model settings', async () => {
+  await withTempDir(async (dataDir) => {
+    async function withServer(run) {
+      const { server } = createSwarmPiServer({ dataDir });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const client = new Client({ name: 'language-test', version: '1.0.0' });
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      try {
+        await run((name, args = {}) => client.callTool({ name, arguments: args }));
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    }
+
+    await withServer(async (call) => {
+      const initial = (await call('app_get_state')).structuredContent;
+      assert.equal(initial.language, 'en');
+      await call('app_set_language', { language: 'zh-CN' });
+      assert.equal((await call('app_set_language', { language: 'fr' })).isError, true);
+      const updated = (await call('app_get_state')).structuredContent;
+      assert.equal(updated.language, 'zh-CN');
+      assert.deepEqual(updated.settings, initial.settings);
+      assert.equal((await call('app_save_settings', { settings: initial.defaults })).structuredContent.language, 'zh-CN');
+    });
+    await withServer(async (call) => {
+      assert.equal((await call('open_pi_swarm_settings')).structuredContent.language, 'zh-CN');
+      await call('app_set_language', { language: 'en' });
+    });
+    await withServer(async (call) => {
+      assert.equal((await call('open_pi_swarm_settings')).structuredContent.language, 'en');
+    });
   });
 });
