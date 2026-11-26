@@ -8,11 +8,11 @@ Run named Pi or Codex workers in parallel from Google Antigravity with `/swarm_p
 
 ## Features
 
-- **Direct MCP orchestration**. The main Antigravity conversation calls `swarm-pi_pi` to create a swarm, assign tasks, and read the board. All tasks run through the harness saved in Settings. If the selected executable is unavailable, the plugin reports the error.
-- **Named workers and shared messages**. Workers can hand off tasks with `@mentions`. Each worker keeps its session and working directory for follow-ups. The panel shows tool calls, worktree changes, and any model ID reported by the harness.
+- **Native Antigravity subagents**. A lightweight wrapper dispatches and monitors each assignment through `swarm-pi_pi`. Antigravity displays the wrapper in its native Subagents UI and wakes the coordinator on completion. Pi or Codex performs the work.
+- **Named workers and shared messages**. Workers can hand off tasks with `@mentions`. Each worker keeps its session and working directory for follow-ups. Select a worker's Subagent card in the Pi Swarm panel to inspect its brief, latest task status and elapsed time, tool calls, model, worktree, and log path when available.
 - **Git worktree isolation**. Give parallel writers separate worktrees and `swarm-pi/*` branches. Review the changes and clean up the worktrees when finished.
 - **Per-role settings**. Configure model, reasoning, and timeout for roles such as coder, verifier, and researcher. Pi exposes a tool allowlist. Codex exposes a sandbox setting.
-- **Prebuilt plugin**. The repository and release archives include the MCP server and panel bundles. Antigravity starts the server directly with Node.js.
+- **Prebuilt plugin**. The repository and release archives include the MCP server, panel, and native subagent definition. Antigravity starts the server directly with Node.js.
 
 ## Prerequisites
 
@@ -78,6 +78,14 @@ To remove a global installation, run the installed script with `--uninstall`.
 Workers hand off work by including `SWARM_POST @worker message` in their final reply. The MCP server routes the message after the turn finishes. Finish or cancel active tasks before switching harnesses. Existing boards stay readable and become available for posting again when their original harness is selected.
 
 Boards and queues live in the MCP process. The plugin data directory contains task logs, Pi sessions, and Codex session IDs. Codex stores its session transcripts in its own CLI data directory. Codex's JSONL output does not report the actual model, so the panel shows the configured model separately.
+
+### Native Antigravity Subagent Mode (recommended)
+
+By default, `/swarm_pi` uses `invoke_subagent` with `Model="flash_lite"` to launch the bundled `swarm-pi-worker` for each assignment ready to run. The coordinator ends the main turn after launch. Each wrapper monitors its Pi or Codex worker through `swarm-pi_pi`. Antigravity shows the wrapper in its native **Subagents** list and chat, then wakes the coordinator with its completion report. The main conversation uses zero polling. The wrapper adds host-model tokens for dispatching, monitoring, and reporting. Pi or Codex performs all implementation and verification. [Antigravity custom subagents](https://antigravity.google/docs/subagents/#subagent-lifecycle-and-states)
+
+### Direct MCP Board Mode (fallback)
+
+Ask for Direct MCP Board Mode in your `/swarm_pi` request when you want zero host-wrapper turns. The coordinator dispatches and reads the board through `swarm-pi_pi` directly. The Pi Swarm side panel shows native-style Subagent cards and a per-worker inspector in both modes.
 
 ## Develop and package
 

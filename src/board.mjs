@@ -47,17 +47,30 @@ export class SwarmBoards {
     return this.snapshot(this.get(id), after);
   }
 
-  async waitForMessages(id, after = 0, waitMs = 0) {
+  async waitForMessages(id, after = 0, waitMs = 0, { member } = {}) {
     const board = this.get(id);
-    if (waitMs > 0 && board.messages.length <= after && !board.closed) {
+    const worker = board.roster.get(member);
+    if (member !== undefined && !worker) throw new Error(`Unknown member: @${member}`);
+
+    const involvesMember = ({ from, to }) => from === member || to === member;
+    const workerFinished = () => worker.turns > 0 && worker.status !== 'working';
+    const hasUpdate = worker
+      ? workerFinished() || board.messages.slice(after).some(involvesMember)
+      : board.messages.length > after;
+    if (waitMs > 0 && !hasUpdate && !board.closed) {
       await new Promise((resolve) => {
         const finish = () => {
           clearTimeout(timer);
-          board.waiters.delete(finish);
+          board.waiters.delete(wake);
           resolve();
         };
+        const wake = (entry) => {
+          if (board.closed || (worker
+            ? workerFinished() || (entry?.number > after && involvesMember(entry))
+            : entry)) finish();
+        };
         const timer = setTimeout(finish, waitMs);
-        board.waiters.add(finish);
+        board.waiters.add(wake);
       });
     }
     return this.snapshot(board, after);
@@ -86,8 +99,8 @@ export class SwarmBoards {
       throw new Error(`This swarm uses ${board.harness}. Select ${board.harness} in Settings to continue it, or create a new swarm for ${harness}.`);
     }
     if (board.closed) throw new Error('This Pi Swarm is closed');
-    this.deliver(board, { from, to, text, budget: { remaining: MAX_HANDOFFS } });
-    return this.snapshot(board);
+    const entry = this.deliver(board, { from, to, text, budget: { remaining: MAX_HANDOFFS } });
+    return { ...this.snapshot(board), postedMessageNumber: entry.number };
   }
 
   append(board, { from, to = null, text, kind, ...details }) {
@@ -96,16 +109,18 @@ export class SwarmBoards {
       from, to, text, kind, ...details,
     };
     board.messages.push(entry);
-    for (const wake of board.waiters) wake();
+    for (const wake of board.waiters) wake(entry);
     return entry;
   }
 
   deliver(board, { from, to, text, budget, ...details }) {
     const recipient = board.roster.get(to);
     const entry = this.append(board, { from, to, text, kind: 'message', ...details });
-    if (!recipient) return;
-    recipient.queue.push({ entry, budget });
-    if (recipient.status !== 'working') void this.runMember(board, recipient);
+    if (recipient) {
+      recipient.queue.push({ entry, budget });
+      if (recipient.status !== 'working') void this.runMember(board, recipient);
+    }
+    return entry;
   }
 
   async runMember(board, member) {
@@ -182,16 +197,38 @@ export class SwarmBoards {
       }
     }
     member.status = member.lastTurnFailed ? 'blocked' : 'waiting';
+    for (const wake of board.waiters) wake();
   }
 
   snapshot(board, after = 0) {
     return {
       id: board.id, title: board.title, harness: board.harness, closed: board.closed,
-      members: [...board.roster.values()].map((member) => ({
-        name: member.name, role: member.role, status: member.status,
-        queued: member.queue.length, turns: member.turns, actualModel: member.actualModel,
-        cwd: member.cwd, taskId: member.taskId, worktreeTaskId: member.worktreeTaskId,
-      })),
+      members: [...board.roster.values()].map((member) => {
+        const task = member.taskId && this.taskManager.tasks.get(member.taskId);
+        const snapshot = task && this.taskManager.formatTaskSnapshot(task);
+        // Follow-up tasks reuse the original task's worktree without owning it.
+        const worktree = snapshot?.worktree ?? (member.worktreeTaskId && this.taskManager.tasks.get(member.worktreeTaskId)?.worktree);
+        return {
+          name: member.name, role: member.role, status: member.status,
+          queued: member.queue.length, turns: member.turns, actualModel: member.actualModel,
+          cwd: member.cwd, taskId: member.taskId, worktreeTaskId: member.worktreeTaskId,
+          brief: member.brief || '',
+          ...(snapshot && {
+            latestTask: {
+              taskId: snapshot.task_id,
+              status: snapshot.status,
+              elapsedMs: snapshot.elapsed_ms,
+              toolCalls: snapshot.tool_calls,
+              configuredModel: snapshot.profile.model,
+              actualModel: snapshot.actual_model,
+              worktreeBranch: worktree?.branch ?? null,
+              worktreePath: worktree?.path ?? null,
+              worktreeCleaned: worktree?.cleaned ?? false,
+              logPath: snapshot.log_path,
+            },
+          }),
+        };
+      }),
       lastMessage: board.messages.length,
       messages: board.messages.slice(after).slice(0, 50),
     };

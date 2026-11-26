@@ -95,6 +95,7 @@ else
     LICENSE \
     install.sh \
     assets \
+    agents \
     bin \
     skills \
     ui

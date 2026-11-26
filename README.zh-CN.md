@@ -8,10 +8,10 @@
 
 ## 特性
 
-- **MCP 直调**。主对话通过 `swarm-pi_pi` 创建协作组、派发任务并读消息。所有任务使用设置中选定的执行器。找不到执行器时，插件会报告具体错误。
+- **Antigravity 原生子代理**。轻量转发代理通过 `swarm-pi_pi` 派发和跟踪任务，在 Antigravity 原生 Subagents 界面中可见，任务结束后自动唤醒协调器。实际工作由 Pi 或 Codex 执行。
 - **Git Worktree 隔离**。`pi_submit_task(..., worktree: true)` 为并发写入创建独立 worktree 和 `swarm-pi/*` 分支。任务完成后可查看变更并清理工作树。
-- **共享消息板和角色设置**。在面板查看成员消息、任务结果、工具调用及执行器报告的模型。可为 `coder`、`verifier`、`researcher` 等角色配置模型、推理档位和超时。Pi 可配置工具白名单，Codex 可配置沙箱。
-- **预构建安装包**。仓库和 Release 包包含 MCP 服务与面板。Antigravity 直接通过 Node.js 启动服务。
+- **共享消息板和角色设置**。在 Pi Swarm 面板选择成员的 Subagent 卡片，可查看该成员的职责说明，以及最近任务的状态、耗时、工具调用、模型、工作树和日志路径等可用信息。可为 `coder`、`verifier`、`researcher` 等角色配置模型、推理档位和超时。Pi 可配置工具白名单，Codex 可配置沙箱。
+- **预构建安装包**。仓库和 Release 包包含 MCP 服务、面板与原生子代理定义。Antigravity 直接通过 Node.js 启动服务。
 
 ---
 
@@ -82,6 +82,14 @@ agy plugin install ./agy-swarm-pi
 成员通过最终回复中的 `SWARM_POST @成员 消息` 交接。切换执行器前，请先等待任务完成或取消任务。旧看板可继续查看，切回原执行器后可继续发消息。
 
 消息板和队列随 MCP 进程存活。插件数据目录保留任务日志、Pi 会话文件和 Codex 会话 ID。Codex 会话正文由其 CLI 保存。Codex 的 JSONL 输出未上报实际模型，面板会单独显示配置模型。
+
+### Antigravity 原生子代理模式（推荐）
+
+`/swarm_pi` 默认通过 `invoke_subagent` 以 `Model="flash_lite"` 为每个可执行的任务启动随插件提供的 `swarm-pi-worker`。协调器启动后结束主对话当前轮次。转发代理通过 `swarm-pi_pi` 跟踪 Pi 或 Codex 任务，在 Antigravity 原生 **Subagents** 列表和聊天中可见。任务完成时，Antigravity 会用完成报告唤醒协调器，主对话无需轮询。转发代理的派发、等待和汇报会消耗宿主模型 token。实际实现和验证由 Pi 或 Codex 执行。[Antigravity 原生子代理文档](https://antigravity.google/docs/subagents/#subagent-lifecycle-and-states)
+
+### MCP 直连消息板模式（备用）
+
+如果希望省去宿主转发代理的轮次，可以在 `/swarm_pi` 请求中指定 MCP 直连消息板模式。协调器直接通过 `swarm-pi_pi` 派发和读取消息。两种模式都可以在 Pi Swarm 侧边面板查看原生风格的 Subagent 卡片和成员详情。
 
 ---
 

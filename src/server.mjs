@@ -394,14 +394,16 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
       timeoutSec: z.number().int().min(10).max(7200).optional(),
     })).min(1).max(12),
   }, (args) => boards.create(args));
-  boardTool('pi_swarm_post', 'Post as the coordinator and wake or queue the named worker.', postShape,
+  boardTool('pi_swarm_post', 'Post as the coordinator and wake or queue the named worker. Returns the exact postedMessageNumber for matching replies.', postShape,
     ({ boardId, to, text }) => boards.post(boardId, 'coordinator', to, text));
-  boardTool('pi_swarm_read', 'Read roster status and up to 50 messages after the cursor. Use waitMs to wait for new messages.',
-    { ...readBoardShape, waitMs: z.number().int().min(0).max(30000).optional() },
-    ({ boardId, after, waitMs }) => boards.waitForMessages(boardId, after, waitMs));
+  boardTool('pi_swarm_read', 'Read member status, latest task telemetry, and up to 50 messages after the cursor. With member and waitMs, wait for that worker to finish, a message involving that worker, or board closure. Returns the full board page.', {
+    ...readBoardShape,
+    waitMs: z.number().int().min(0).max(60000).optional(),
+    member: memberName.optional(),
+  }, ({ boardId, after, waitMs, member }) => boards.waitForMessages(boardId, after, waitMs, { member }));
   boardTool('pi_swarm_close', 'Close an idle Pi Swarm and release its worktrees for cleanup.', { boardId },
     ({ boardId }) => boards.close(boardId));
-  boardTool('app_read_board', 'List swarms or read updates to a selected board.',
+  boardTool('app_read_board', 'List swarms or read messages and member task telemetry for a selected board.',
     { ...readBoardShape, boardId: boardId.optional() }, readAppBoard, true);
   boardTool('app_post_board', 'Post a user message and wake or queue the named Pi worker.', postShape,
     ({ boardId, to, text }) => boards.post(boardId, 'user', to, text), true);

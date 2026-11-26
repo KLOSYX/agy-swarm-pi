@@ -423,6 +423,8 @@ test('MCP server exposes task tools and serves the bundled Pi Swarm MCP App', as
     const res = await client.readResource({ uri: 'ui://swarm-pi/settings.html' });
     assert.equal(res.contents[0].mimeType, 'text/html;profile=mcp-app');
     assert.ok(res.contents[0].text.includes('<html lang="en">'));
+    assert.match(res.contents[0].text, /<style>\s*\S[\s\S]*?<\/style>/);
+    assert.match(res.contents[0].text, /<div id="app"><\/div>\s*<script>\s*\S[\s\S]*?<\/script>/);
     assert.ok(res.contents[0].text.includes('Shared message board'));
     assert.ok(res.contents[0].text.includes('任务看板'));
     assert.ok(res.contents[0].text.includes('共享消息板'));
@@ -496,6 +498,11 @@ test('the plugin manifest starts the bundled MCP panel directly with Node', asyn
       assert.match(app.contents[0].text, /Active harness/);
       const result = await client.callTool({ name: 'pi_get_settings', arguments: {} });
       assert.equal(result.structuredContent.settingsPath, path.join(data, 'settings.json'));
+      const board = await client.callTool({
+        name: 'pi_create_swarm',
+        arguments: { title: 'Bundle smoke test', cwd: root, members: [{ name: 'coder', brief: 'Review the build' }] },
+      });
+      assert.equal(board.structuredContent.members[0].brief, 'Review the build');
     } finally {
       await client.close();
     }

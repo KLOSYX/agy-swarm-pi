@@ -14,6 +14,7 @@ const INCLUDE_PATHS = [
   'README.zh-CN.md',
   'LICENSE',
   'install.sh',
+  'agents/swarm-pi-worker.md',
   'assets/logo.svg',
   'bin/start-server.sh',
   'bin/server.bundle.mjs',

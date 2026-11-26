@@ -8,7 +8,13 @@ const distDir = path.join(__dirname, 'dist');
 
 async function build() {
   await fs.mkdir(distDir, { recursive: true });
-  const css = await fs.readFile(path.join(__dirname, 'src', 'styles.css'), 'utf8');
+  const sourceCss = await fs.readFile(path.join(__dirname, 'src', 'styles.css'), 'utf8');
+  const { code: css } = await esbuild.transform(sourceCss, {
+    loader: 'css',
+    minify: true,
+    sourcefile: 'ui/src/styles.css',
+    logLevel: 'warning',
+  });
 
   const result = await esbuild.build({
     entryPoints: [path.join(__dirname, 'src', 'app.ts')],
@@ -27,6 +33,7 @@ async function build() {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
   <title>Pi Swarm</title>
   <style>${css}</style>
 </head>
