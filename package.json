@@ -1,0 +1,22 @@
+{
+  "name": "swarm-pi",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Swarm Pi MCP server and settings UI for Antigravity",
+  "scripts": {
+    "build:ui": "node ui/build.mjs",
+    "build:server": "node scripts/build-server.mjs",
+    "build": "npm run build:ui && npm run build:server",
+    "pack": "npm run build && node scripts/pack-release.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/ext-apps": "^1.0.1",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

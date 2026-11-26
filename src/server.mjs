@@ -1,0 +1,568 @@
+import fsSync from 'node:fs';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import {
+  RESOURCE_MIME_TYPE,
+  registerAppResource,
+  registerAppTool,
+} from '@modelcontextprotocol/ext-apps/server';
+import { z } from 'zod';
+import {
+  DEFAULT_SETTINGS,
+  ROLE_THINKING_OPTIONS,
+  SettingsStore,
+  THINKING_LEVELS,
+} from './config.mjs';
+import { PiTaskManager, resolvePiExecutable } from './pi-runner.mjs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PLUGIN_ROOT = process.env.PLUGIN_ROOT || path.resolve(__dirname, '..');
+const SETTINGS_APP_URI = 'ui://swarm-pi/settings.html';
+
+function parseCliArgs(argv) {
+  let dataDir =
+    process.env.PLUGIN_DATA ||
+    path.join(os.homedir(), '.gemini', 'config', 'plugins', 'swarm-pi', '.data');
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--data-dir' && argv[i + 1]) {
+      dataDir = argv[i + 1];
+      i += 1;
+    } else if (arg.startsWith('--data-dir=')) {
+      dataDir = arg.slice('--data-dir='.length);
+    }
+  }
+  return { dataDir };
+}
+
+function jsonToolResult(payload, summaryText = null) {
+  return {
+    content: [
+      {
+        type: 'text',
+        text: summaryText || JSON.stringify(payload, null, 2),
+      },
+    ],
+    structuredContent: payload,
+  };
+}
+
+function errorToolResult(err) {
+  const message = err instanceof Error ? err.message : String(err);
+  return {
+    isError: true,
+    content: [{ type: 'text', text: message }],
+  };
+}
+
+export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
+  const resolvedDataDir = dataDir || parseCliArgs(process.argv.slice(2)).dataDir;
+  const resolvedUiPath =
+    uiHtmlPath ||
+    process.env.SWARM_PI_APP_HTML ||
+    path.join(PLUGIN_ROOT, 'ui', 'dist', 'settings.html');
+
+  const settingsStore = new SettingsStore(resolvedDataDir);
+  const taskManager = new PiTaskManager({
+    dataDir: resolvedDataDir,
+    settingsStore,
+  });
+
+  const server = new McpServer({
+    name: 'swarm-pi',
+    version: '0.2.0',
+  });
+
+  async function buildAppState(extra = {}) {
+    const settings = await settingsStore.load();
+    const piStatus = await resolvePiExecutable(settings.piPath);
+    return {
+      settings,
+      defaults: DEFAULT_SETTINGS,
+      thinkingLevels: THINKING_LEVELS,
+      roleThinkingOptions: ROLE_THINKING_OPTIONS,
+      piStatus,
+      modelsCache: taskManager.modelsCache,
+      recentTasks: taskManager.listTasks({ limit: 25 }),
+      settingsPath: settingsStore.filePath,
+      ...extra,
+    };
+  }
+
+  registerAppResource(
+    server,
+    'Pi Swarm Panel',
+    SETTINGS_APP_URI,
+    {
+      description: 'Interactive Pi Swarm panel for monitoring parallel Pi tasks and configuring models & thinking levels',
+      mimeType: RESOURCE_MIME_TYPE,
+      _meta: {
+        ui: {
+          prefersBorder: false,
+        },
+      },
+    },
+    async () => {
+      let html;
+      try {
+        html = await fs.readFile(resolvedUiPath, 'utf8');
+      } catch (err) {
+        html = `<!doctype html><html><body><p>Failed to load Swarm Pi UI (${resolvedUiPath}): ${String(err.message || err)}</p></body></html>`;
+      }
+      return {
+        contents: [
+          {
+            uri: SETTINGS_APP_URI,
+            mimeType: RESOURCE_MIME_TYPE,
+            text: html,
+            _meta: {
+              ui: {
+                prefersBorder: false,
+              },
+            },
+          },
+        ],
+      };
+    },
+  );
+
+  registerAppTool(
+    server,
+    'open_pi_swarm_settings',
+    {
+      title: 'Pi Swarm',
+      description:
+        'Open or refresh the interactive Pi Swarm side/global panel (live Tasks Monitor + Settings for Pi models and thinking levels). Pass tab="tasks" during /swarm_pi to surface live Pi task progress.',
+      inputSchema: {
+        tab: z
+          .enum(['tasks', 'settings'])
+          .optional()
+          .describe('Which tab to focus: "tasks" for live Pi task board or "settings" for model/role config'),
+        focusRole: z
+          .string()
+          .optional()
+          .describe('Optional role name to highlight in the settings UI'),
+      },
+      _meta: {
+        ui: {
+          resourceUri: SETTINGS_APP_URI,
+        },
+        'com.google.antigravity/ui': {
+          entrypoints: [
+            { type: 'aux_pane', title: 'Pi Swarm' },
+            { type: 'global', title: 'Pi Swarm' },
+          ],
+        },
+      },
+    },
+    async ({ tab } = {}) => {
+      try {
+        const state = await buildAppState({
+          initialTab: tab || null,
+        });
+        const running = state.recentTasks.filter((t) => t.status === 'running').length;
+        return jsonToolResult(
+          state,
+          `Opened Pi Swarm panel (tab=${tab || 'auto'}, runningTasks=${running}, pi=${state.piStatus.found ? state.piStatus.path : 'not found'}).`,
+        );
+      } catch (err) {
+        return errorToolResult(err);
+      }
+    },
+  );
+
+  registerAppTool(
+    server,
+    'app_get_state',
+    {
+      title: 'Get Swarm Pi App State',
+      description: 'App-only tool to fetch current settings, Pi binary status, and live task snapshots.',
+      inputSchema: {},
+      _meta: {
+        ui: {
+          visibility: ['app'],
+        },
+      },
+    },
+    async () => {
+      try {
+        return jsonToolResult(await buildAppState());
+      } catch (err) {
+        return errorToolResult(err);
+      }
+    },
+  );
+
+  registerAppTool(
+    server,
+    'app_save_settings',
+    {
+      title: 'Save Swarm Pi Settings',
+      description: 'App-only tool to persist updated Swarm Pi settings.',
+      inputSchema: {
+        settings: z.record(z.unknown()),
+      },
+      _meta: {
+        ui: {
+          visibility: ['app'],
+        },
+      },
+    },
+    async ({ settings }) => {
+      try {
+        await settingsStore.save(settings);
+        const state = await buildAppState();
+        return jsonToolResult(state, 'Settings saved.');
+      } catch (err) {
+        return errorToolResult(err);
+      }
+    },
+  );
+
+  registerAppTool(
+    server,
+    'app_refresh_models',
+    {
+      title: 'Refresh Pi Models',
+      description: 'App-only tool to re-probe Pi executable and run pi --list-models.',
+      inputSchema: {},
+      _meta: {
+        ui: {
+          visibility: ['app'],
+        },
+      },
+    },
+    async () => {
+      try {
+        await taskManager.listModels({ refresh: true });
+        return jsonToolResult(await buildAppState());
+      } catch (err) {
+        return errorToolResult(err);
+      }
+    },
+  );
+
+  registerAppTool(
+    server,
+    'app_cancel_task',
+    {
+      title: 'Cancel Pi Task From App',
+      description: 'App-only tool to cancel a running Pi task from the Tasks Monitor.',
+      inputSchema: {
+        taskId: z.string(),
+      },
+      _meta: {
+        ui: {
+          visibility: ['app'],
+        },
+      },
+    },
+    async ({ taskId }) => {
+      try {
+        await taskManager.cancel(taskId);
+        return jsonToolResult(await buildAppState());
+      } catch (err) {
+        return errorToolResult(err);
+      }
+    },
+  );
+
+  registerAppTool(
+    server,
+    'app_cleanup_worktree',
+    {
+      title: 'Cleanup Worktree From App',
+      description: 'App-only tool to remove a finished task git worktree from the Tasks Monitor.',
+      inputSchema: {
+        taskId: z.string(),
+        deleteBranch: z.boolean().optional(),
+      },
+      _meta: {
+        ui: {
+          visibility: ['app'],
+        },
+      },
+    },
+    async ({ taskId, deleteBranch }) => {
+      try {
+        await taskManager.cleanupWorktree(taskId, {
+          deleteBranch: Boolean(deleteBranch),
+        });
+        return jsonToolResult(await buildAppState());
+      } catch (err) {
+        return errorToolResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    'pi_get_settings',
+    {
+      title: 'Get Pi Swarm Settings',
+      description:
+        'Inspect current Pi Swarm settings (piPath, default model/thinking/tools, role presets) and check whether the pi binary is available.',
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        const state = await buildAppState();
+        return jsonToolResult({
+          piStatus: state.piStatus,
+          settings: state.settings,
+          settingsPath: state.settingsPath,
+        });
+      } catch (err) {
+        return errorToolResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    'pi_update_settings',
+    {
+      title: 'Update Pi Swarm Settings',
+      description:
+        'Update Pi Swarm global defaults or per-role presets (model, thinking level, tools, timeoutSec, piPath).',
+      inputSchema: {
+        piPath: z.string().optional().describe('Path to pi binary or "auto"'),
+        default: z
+          .object({
+            model: z.string().optional(),
+            thinking: z.enum(THINKING_LEVELS).optional(),
+            tools: z.string().optional(),
+            timeoutSec: z.number().int().min(10).max(7200).optional(),
+          })
+          .optional(),
+        roles: z
+          .record(
+            z
+              .object({
+                model: z.string().optional(),
+                thinking: z.enum(ROLE_THINKING_OPTIONS).optional(),
+                tools: z.string().optional(),
+                timeoutSec: z.number().int().min(10).max(7200).nullable().optional(),
+              })
+              .nullable(),
+          )
+          .optional(),
+        deleteRoles: z.array(z.string()).optional(),
+      },
+    },
+    async (args) => {
+      try {
+        const updated = await settingsStore.patch(args);
+        const piStatus = await resolvePiExecutable(updated.piPath);
+        return jsonToolResult({ piStatus, settings: updated });
+      } catch (err) {
+        return errorToolResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    'pi_list_models',
+    {
+      title: 'List Pi Models',
+      description: 'Run `pi --list-models` to inspect available provider/model identifiers.',
+      inputSchema: {
+        refresh: z.boolean().optional().describe('Bypass cache and re-run pi --list-models'),
+      },
+    },
+    async ({ refresh } = {}) => {
+      try {
+        const result = await taskManager.listModels({ refresh: Boolean(refresh) });
+        return jsonToolResult(result);
+      } catch (err) {
+        return errorToolResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    'pi_submit_task',
+    {
+      title: 'Submit Async Pi Task',
+      description:
+        'Start an external Pi coding agent task asynchronously in the given workspace directory (or an isolated git worktree when worktree=true), applying configured role presets or explicit overrides.',
+      inputSchema: {
+        prompt: z.string().describe('Task prompt for Pi'),
+        cwd: z.string().describe('Absolute path to the workspace directory'),
+        label: z
+          .string()
+          .optional()
+          .describe('Short human-readable task label shown in the Pi Swarm Tasks Monitor (e.g. parser-coder)'),
+        role: z
+          .string()
+          .optional()
+          .describe('Preset role name (e.g. coder, verifier, researcher)'),
+        worktree: z
+          .boolean()
+          .optional()
+          .describe('Set true to isolate concurrent editing tasks in a dedicated git worktree & branch'),
+        model: z.string().optional().describe('Optional model override'),
+        thinking: z
+          .enum(THINKING_LEVELS)
+          .optional()
+          .describe('Optional thinking level override'),
+        tools: z.string().optional().describe('Optional comma-separated Pi tool allowlist'),
+        timeoutSec: z.number().int().min(10).max(7200).optional(),
+        sessionKey: z
+          .string()
+          .optional()
+          .describe('Stable session key to preserve Pi conversation across follow-up turns'),
+      },
+    },
+    async (args) => {
+      try {
+        const result = await taskManager.submit(args);
+        return jsonToolResult(result);
+      } catch (err) {
+        return errorToolResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    'pi_poll_task',
+    {
+      title: 'Poll Async Pi Task',
+      description:
+        'Wait for or check the status and output of a single submitted Pi task. Uses long-polling up to waitMs (default 15000ms).',
+      inputSchema: {
+        taskId: z.string().describe('Task ID returned by pi_submit_task'),
+        waitMs: z
+          .number()
+          .int()
+          .min(0)
+          .max(60000)
+          .optional()
+          .describe('Milliseconds to wait for completion before returning (default 15000)'),
+      },
+    },
+    async ({ taskId, waitMs }) => {
+      try {
+        const result = await taskManager.poll(taskId, {
+          waitMs: waitMs ?? 15000,
+        });
+        return jsonToolResult(result);
+      } catch (err) {
+        return errorToolResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    'pi_wait_tasks',
+    {
+      title: 'Wait For Multiple Pi Tasks',
+      description:
+        'Wait on a batch of parallel Pi tasks (mode="all" waits for all tasks or waitMs timeout; mode="any" wakes when any task finishes). Returns status, actual_model, worktree diff stat, and results for every task.',
+      inputSchema: {
+        taskIds: z
+          .array(z.string())
+          .min(1)
+          .describe('Array of task IDs returned by pi_submit_task'),
+        waitMs: z
+          .number()
+          .int()
+          .min(0)
+          .max(60000)
+          .optional()
+          .describe('Milliseconds to wait before returning current snapshots (default 20000)'),
+        mode: z
+          .enum(['all', 'any'])
+          .optional()
+          .describe('Whether to wait until all tasks finish or any task finishes (default "all")'),
+      },
+    },
+    async ({ taskIds, waitMs, mode }) => {
+      try {
+        const result = await taskManager.waitTasks(taskIds, {
+          waitMs: waitMs ?? 20000,
+          mode: mode || 'all',
+        });
+        return jsonToolResult(result);
+      } catch (err) {
+        return errorToolResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    'pi_cancel_task',
+    {
+      title: 'Cancel Async Pi Task',
+      description: 'Terminate a running Pi task by taskId.',
+      inputSchema: {
+        taskId: z.string(),
+      },
+    },
+    async ({ taskId }) => {
+      try {
+        return jsonToolResult(await taskManager.cancel(taskId));
+      } catch (err) {
+        return errorToolResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    'pi_cleanup_worktree',
+    {
+      title: 'Cleanup Task Git Worktree',
+      description:
+        'Remove the isolated git worktree directory created for a finished task (call after merging or discarding changes). Optionally deletes the temporary branch when deleteBranch=true.',
+      inputSchema: {
+        taskId: z.string().describe('Task ID whose worktree should be removed'),
+        deleteBranch: z
+          .boolean()
+          .optional()
+          .describe('Also delete the temporary swarm-pi/* branch (default false)'),
+      },
+    },
+    async ({ taskId, deleteBranch }) => {
+      try {
+        return jsonToolResult(
+          await taskManager.cleanupWorktree(taskId, {
+            deleteBranch: Boolean(deleteBranch),
+          }),
+        );
+      } catch (err) {
+        return errorToolResult(err);
+      }
+    },
+  );
+
+  return { server, settingsStore, taskManager, dataDir: resolvedDataDir };
+}
+
+async function main() {
+  const { dataDir } = parseCliArgs(process.argv.slice(2));
+  const { server } = createSwarmPiServer({ dataDir });
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
+const isEntrypoint = (() => {
+  if (!process.argv[1]) return false;
+  try {
+    return (
+      fsSync.realpathSync(fileURLToPath(import.meta.url)) ===
+      fsSync.realpathSync(process.argv[1])
+    );
+  } catch {
+    return import.meta.url === pathToFileURL(process.argv[1]).href;
+  }
+})();
+
+if (isEntrypoint) {
+  main().catch((err) => {
+    console.error('swarm-pi server fatal error:', err);
+    process.exit(1);
+  });
+}
