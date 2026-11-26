@@ -2,13 +2,13 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-在 **Google Antigravity** 中通过 `/swarm_pi` **直接并发调度外部 Pi**（`@mariozechner/pi-coding-agent`）执行编码、审查与调研任务——**零中间代理模型开销**，内置 Git Worktree 隔离、按角色模型/思考档位配置以及实时 **Pi Swarm 任务看板**。
+在 **Google Antigravity** 中通过 `/swarm_pi` **直接并发调度外部 Pi**（`@mariozechner/pi-coding-agent`）执行编码、审查与调研任务——**零中间代理模型开销**，内置 Git Worktree 隔离、按角色模型/思考档位配置以及实时 **Pi Swarm 共享消息板**。
 
 ## 特性
 
-- **MCP 直调零代理层（`/swarm_pi`）**：由主对话直接并发调用 `swarm-pi_pi`（`pi_submit_task` / `pi_wait_tasks` / `pi_cleanup_worktree`），不再额外消耗 `flash_lite` 等中间代理模型额度；免终端网络沙盒审批，具备 Fail-Closed 强熔断护栏。
+- **MCP 直调零代理层（`/swarm_pi`）**：由主对话直接调用 `swarm-pi_pi`（`pi_create_swarm` / `pi_swarm_post` / `pi_swarm_read`），不再额外消耗 `flash_lite` 等中间代理模型额度；免终端网络沙盒审批，具备 Fail-Closed 强熔断护栏。
 - **内置 Git Worktree 隔离**：`pi_submit_task(..., worktree: true)` 自动创建独立 worktree 与 `swarm-pi/*` 分支供并发写代码使用，完成后自动返回 `diff_stat` 与真实执行的 `actual_model`，并支持清理临时工作树。
-- **双标签页可视化面板（Pi Swarm）**：在 Antigravity 侧边栏或右上角 `+` 菜单打开 **Pi Swarm**，实时查看并发 Pi 任务的实际模型、思考档位、工具调用、Worktree 变更与输出结果，并可在「模型与角色设置」页自定义全局默认与 `coder`/`verifier`/`researcher` 等角色预设。
+- **消息板、任务和设置面板（Pi Swarm）**：在 Antigravity 侧边栏或右上角 `+` 菜单打开 **Pi Swarm**，查看命名成员之间的消息、向成员追加指令，或查看并发 Pi 任务的实际模型、思考档位、工具调用、Worktree 变更与输出结果，并可在「模型与角色设置」页自定义全局默认与 `coder`/`verifier`/`researcher` 等角色预设。
 - **开箱即用零依赖**：仓库及 Release 包已内置打包好的单文件 MCP Server（`bin/server.bundle.mjs`）与单文件 MCP App UI（`ui/dist/settings.html`），目标机器无需执行 `npm install`，自动复用系统 Node.js 或 Antigravity 内置 `agy-node`。
 
 ---
@@ -25,10 +25,12 @@ npm install -g @mariozechner/pi-coding-agent
 
 ## 快速安装
 
-### 方式一：从 GitHub Release 下载零依赖安装包（推荐）
+### 方式一：从 GitHub Release 下载零依赖安装包
+
+下面以 v0.2.0 为例。共享消息板需要 v0.3.0 或更新版本。
 
 ```bash
-curl -fsSLO https://github.com/KLOSYX/agy-swarm-pi/releases/latest/download/swarm-pi-v0.2.0.tar.gz
+curl -fsSLO https://github.com/KLOSYX/agy-swarm-pi/releases/download/v0.2.0/swarm-pi-v0.2.0.tar.gz
 tar -xzf swarm-pi-v0.2.0.tar.gz
 ./swarm-pi/install.sh
 ```
@@ -64,7 +66,9 @@ agy plugin install ./agy-swarm-pi
 
 1. 安装完成后，如客户端已打开，请在右上角 `... > MCP Servers` 刷新 `swarm-pi_pi`（或重启 Antigravity 窗口）。
 2. 在 Antigravity 侧边栏或对话右上角 `+` 菜单打开 **Pi Swarm**，切换到 **模型与角色设置**，点击 **检测 Pi / 刷新模型**，设置全局默认及按角色的模型与思考档位并保存。
-3. 在对话中输入 `/swarm_pi <你的任务>`，协调器会直接并行拉起 Pi 任务并在 **Pi Swarm > 任务看板** 展示实时状态与实际执行模型。
+3. 在对话中输入 `/swarm_pi <你的任务>`，协调器创建消息板、添加命名成员并派发任务。在 **Pi Swarm > 共享消息板** 查看成员和消息，选择成员并发送追加指令。空闲成员会接着原 Pi 会话处理，工作中的成员会依次处理排队消息。
+
+Pi worker 通过最终回复中的 `SWARM_POST @成员 消息` 交接。每轮 Pi 执行结束后，MCP 服务负责按成员投递，保留该成员的会话及工作区。消息板和排队状态随 MCP 进程存活。任务日志与 Pi 会话文件保存在插件数据目录。
 
 ---
 

@@ -54,7 +54,11 @@ const model = getArg('--model') || '(default)';
 const thinking = getArg('--thinking') || 'off';
 const tools = getArg('--tools') || '';
 
-if (prompt.includes('SLEEP_LONG')) {
+if (prompt.includes('SETTLED_WITH_OPEN_HANDLE')) {
+  console.log(JSON.stringify({type: 'message_end', message: {role: 'assistant', content: 'Ready'}}));
+  console.log(JSON.stringify({type: 'agent_settled', aborted: false}));
+  setInterval(() => {}, 10000);
+} else if (prompt.includes('SLEEP_LONG')) {
   setTimeout(() => process.exit(0), 10000);
 } else {
   if (prompt.includes('WRITE_FILE')) {
@@ -250,6 +254,13 @@ test('PiTaskManager supports batch waitTasks, sessions, worktree isolation, clea
     const p3 = await manager.poll(t3.task_id, { waitMs: 5000 });
     assert.equal(JSON.parse(p3.result_text).hadContinue, true);
 
+    const settledTask = await manager.submit({
+      prompt: 'SETTLED_WITH_OPEN_HANDLE', cwd: repoDir, finishOnSettled: true,
+    });
+    const settled = await manager.poll(settledTask.task_id, { waitMs: 5000 });
+    assert.equal(settled.status, 'completed');
+    assert.equal(settled.result_text, 'Ready');
+
     // Cancel check
     const longTask = await manager.submit({
       prompt: 'SLEEP_LONG',
@@ -262,7 +273,7 @@ test('PiTaskManager supports batch waitTasks, sessions, worktree isolation, clea
   });
 });
 
-test('MCP server exposes v0.2.0 tools and serves bundled two-tab MCP App HTML', async () => {
+test('MCP server exposes task tools and serves the bundled Pi Swarm MCP App', async () => {
   await withTempDir(async (dir) => {
     const uiDistPath = path.resolve(
       path.dirname(new URL(import.meta.url).pathname),
@@ -308,6 +319,7 @@ test('MCP server exposes v0.2.0 tools and serves bundled two-tab MCP App HTML', 
     const res = await client.readResource({ uri: 'ui://swarm-pi/settings.html' });
     assert.equal(res.contents[0].mimeType, 'text/html;profile=mcp-app');
     assert.ok(res.contents[0].text.includes('任务看板'));
+    assert.ok(res.contents[0].text.includes('共享消息板'));
     assert.ok(Buffer.byteLength(res.contents[0].text, 'utf8') < 10 * 1024 * 1024);
 
     const opened = await client.callTool({

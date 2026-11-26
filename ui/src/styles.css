@@ -349,3 +349,53 @@ details summary {
   padding: 24px 12px;
   color: var(--text-muted);
 }
+
+.board-members,
+.board-messages {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+}
+
+.board-members li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.board-message {
+  border-top: 1px solid var(--border);
+  padding: 9px 0;
+}
+
+.board-message-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.message-error,
+#board-error {
+  color: var(--danger);
+}
+
+#board-form {
+  display: grid;
+  gap: 6px;
+}
+
+#board-instruction {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  padding: 8px;
+}
+
+#board-feed {
+  max-height: 52vh;
+  overflow-y: auto;
+}
+
+#board-post-status:empty {
+  display: none;
+}

@@ -272,6 +272,7 @@ export class PiTaskManager {
     this.dataDir = dataDir;
     this.settingsStore = settingsStore;
     this.tasks = new Map();
+    this.worktreeLeases = new Set();
     this.modelsCache = {
       updatedAt: null,
       models: [],
@@ -412,6 +413,7 @@ export class PiTaskManager {
     timeoutSec,
     sessionKey,
     worktree = false,
+    finishOnSettled = false,
   }) {
     if (!prompt || !String(prompt).trim()) {
       throw new Error('prompt is required');
@@ -521,10 +523,35 @@ export class PiTaskManager {
     }, profile.timeoutSec * 1000);
     task.timer.unref();
 
-    child.stdout.on('data', (chunk) => {
-      const text = chunk.toString('utf8');
+    let settled = false;
+    let settleTimer;
+    let forceTimer;
+    let pendingLine = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (text) => {
       task.stdout += text;
       logStream.write(text).catch(() => {});
+      if (!finishOnSettled || settled) return;
+      const lines = (pendingLine + text).split('\n');
+      pendingLine = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.includes('agent_settled')) continue;
+        let event;
+        try {
+          event = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (event.type !== 'agent_settled' || event.aborted) continue;
+        settled = true;
+        // A provider or extension may keep the process alive after Pi has
+        // finished the run. Release it before dispatching another session turn.
+        settleTimer = setTimeout(() => {
+          child.kill('SIGTERM');
+          forceTimer = setTimeout(() => child.kill('SIGKILL'), 2000);
+        }, 600);
+        break;
+      }
     });
 
     child.stderr.on('data', (chunk) => {
@@ -533,8 +560,13 @@ export class PiTaskManager {
       logStream.write(`[stderr] ${text}`).catch(() => {});
     });
 
+    let finalized = false;
     const finalize = async (code, spawnError = null) => {
+      if (finalized) return;
+      finalized = true;
       clearTimeout(task.timer);
+      clearTimeout(settleTimer);
+      clearTimeout(forceTimer);
       task.endedAt = Date.now();
       task.exitCode = code;
       if (task.cancelled) {
@@ -545,7 +577,7 @@ export class PiTaskManager {
       } else if (spawnError) {
         task.status = 'failed';
         task.stderr = `${task.stderr}\n${spawnError.message}`.trim();
-      } else if (code === 0) {
+      } else if (code === 0 || (settled && code === null)) {
         task.status = 'completed';
       } else {
         task.status = 'failed';
@@ -561,7 +593,7 @@ export class PiTaskManager {
       finalize(-1, err);
     });
     child.on('close', (code) => {
-      finalize(code ?? -1);
+      finalize(code ?? (settled ? null : -1));
     });
 
     this.tasks.set(taskId, task);
@@ -605,6 +637,13 @@ export class PiTaskManager {
       log_path: task.logPath,
       created_at: new Date(task.createdAt).toISOString(),
     };
+  }
+
+  async waitForCompletion(taskId) {
+    const task = this.tasks.get(taskId);
+    if (!task) throw new Error(`Unknown task_id: ${taskId}`);
+    await task.donePromise;
+    return this.formatTaskSnapshot(task);
   }
 
   async poll(taskId, { waitMs = 15000 } = {}) {
@@ -699,6 +738,9 @@ export class PiTaskManager {
     }
     if (task.status === 'running') {
       throw new Error(`Cannot cleanup worktree while task ${taskId} is still running`);
+    }
+    if (this.worktreeLeases.has(taskId)) {
+      throw new Error('Close the Pi Swarm before cleaning up its worktree');
     }
     if (task.worktree.cleaned) {
       return { task_id: taskId, cleaned: true, already_cleaned: true };

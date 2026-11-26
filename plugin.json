@@ -1,8 +1,8 @@
 {
   "name": "swarm-pi",
   "displayName": "Swarm Pi",
-  "version": "0.2.0",
-  "description": "Directly orchestrate parallel external Pi coding agent tasks from Antigravity (/swarm_pi) with zero proxy LLM overhead, built-in git worktree isolation, customizable per-role models/thinking levels, and a live Pi Swarm Tasks Monitor.",
+  "version": "0.3.0",
+  "description": "Directly orchestrate parallel external Pi coding agent tasks from Antigravity (/swarm_pi) with zero proxy LLM overhead, built-in git worktree isolation, customizable per-role models/thinking levels, and a shared, live message board for named Pi workers.",
   "homepage": "https://github.com/KLOSYX/agy-swarm-pi",
   "repository": "https://github.com/KLOSYX/agy-swarm-pi",
   "logo": "assets/logo.svg",

@@ -17,11 +17,17 @@ import {
   SettingsStore,
   THINKING_LEVELS,
 } from './config.mjs';
+import { SwarmBoards } from './board.mjs';
 import { PiTaskManager, resolvePiExecutable } from './pi-runner.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = process.env.PLUGIN_ROOT || path.resolve(__dirname, '..');
 const SETTINGS_APP_URI = 'ui://swarm-pi/settings.html';
+const memberName = z.string().regex(/^[a-z0-9_-]{1,32}$/);
+const boardId = z.string().uuid();
+const postShape = {
+  boardId, to: memberName, text: z.string().trim().min(1).max(4000),
+};
 
 function parseCliArgs(argv) {
   let dataDir =
@@ -73,9 +79,10 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
     settingsStore,
   });
 
+  const boards = new SwarmBoards(taskManager);
   const server = new McpServer({
     name: 'swarm-pi',
-    version: '0.2.0',
+    version: '0.3.0',
   });
 
   async function buildAppState(extra = {}) {
@@ -90,6 +97,7 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
       modelsCache: taskManager.modelsCache,
       recentTasks: taskManager.listTasks({ limit: 25 }),
       settingsPath: settingsStore.filePath,
+      boards: boards.list(),
       ...extra,
     };
   }
@@ -99,7 +107,7 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
     'Pi Swarm Panel',
     SETTINGS_APP_URI,
     {
-      description: 'Interactive Pi Swarm panel for monitoring parallel Pi tasks and configuring models & thinking levels',
+      description: 'Shared Pi Swarm message board, task monitor, and Pi model settings',
       mimeType: RESOURCE_MIME_TYPE,
       _meta: {
         ui: {
@@ -137,12 +145,13 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
     {
       title: 'Pi Swarm',
       description:
-        'Open or refresh the interactive Pi Swarm side/global panel (live Tasks Monitor + Settings for Pi models and thinking levels). Pass tab="tasks" during /swarm_pi to surface live Pi task progress.',
+        'Open the Pi Swarm panel. Pass tab="board" and boardId to focus a shared message board.',
       inputSchema: {
         tab: z
-          .enum(['tasks', 'settings'])
+          .enum(['board', 'tasks', 'settings'])
           .optional()
-          .describe('Which tab to focus: "tasks" for live Pi task board or "settings" for model/role config'),
+          .describe('Which tab to focus'),
+        boardId: boardId.optional().describe('Pi Swarm ID to focus'),
         focusRole: z
           .string()
           .optional()
@@ -160,10 +169,11 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
         },
       },
     },
-    async ({ tab } = {}) => {
+    async ({ tab, boardId: selectedBoardId } = {}) => {
       try {
         const state = await buildAppState({
-          initialTab: tab || null,
+          initialTab: tab || (selectedBoardId ? 'board' : null),
+          initialBoard: selectedBoardId ? boards.read(selectedBoardId) : null,
         });
         const running = state.recentTasks.filter((t) => t.status === 'running').length;
         return jsonToolResult(
@@ -299,6 +309,51 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
       }
     },
   );
+
+  function boardTool(name, description, inputSchema, handler, appOnly = false) {
+    const config = { description, inputSchema };
+    const call = async (args) => {
+      try {
+        return jsonToolResult(await handler(args));
+      } catch (err) {
+        return errorToolResult(err);
+      }
+    };
+    if (appOnly) {
+      registerAppTool(server, name, {
+        ...config, _meta: { ui: { visibility: ['app'] } },
+      }, call);
+    } else {
+      server.registerTool(name, config, call);
+    }
+  }
+
+  const readBoardShape = { boardId, after: z.number().int().nonnegative().optional() };
+  const readAppBoard = ({ boardId, after }) => ({ ...boards.read(boardId, after), boards: boards.list() });
+  boardTool('pi_create_swarm', 'Create a shared Pi Swarm board and its named worker roster.', {
+    title: z.string().trim().min(1).max(120),
+    cwd: z.string(),
+    members: z.array(z.object({
+      name: memberName,
+      role: z.string().optional(),
+      brief: z.string().max(4000).optional(),
+      worktree: z.boolean().optional(),
+      model: z.string().optional(),
+      thinking: z.enum(THINKING_LEVELS).optional(),
+      tools: z.string().optional(),
+      timeoutSec: z.number().int().min(10).max(7200).optional(),
+    })).min(1).max(12),
+  }, (args) => boards.create(args));
+  boardTool('pi_swarm_post', 'Post as the coordinator and wake or queue the named worker.', postShape,
+    ({ boardId, to, text }) => boards.post(boardId, 'coordinator', to, text));
+  boardTool('pi_swarm_read', 'Read roster status and up to 50 messages after the cursor. Use waitMs to wait for new messages.',
+    { ...readBoardShape, waitMs: z.number().int().min(0).max(30000).optional() },
+    ({ boardId, after, waitMs }) => boards.waitForMessages(boardId, after, waitMs));
+  boardTool('pi_swarm_close', 'Close an idle Pi Swarm and release its worktrees for cleanup.', { boardId },
+    ({ boardId }) => boards.close(boardId));
+  boardTool('app_read_board', 'Read Pi Swarm board updates.', readBoardShape, readAppBoard, true);
+  boardTool('app_post_board', 'Post a user message and wake or queue the named Pi worker.', postShape,
+    ({ boardId, to, text }) => boards.post(boardId, 'user', to, text), true);
 
   server.registerTool(
     'pi_get_settings',
@@ -538,7 +593,7 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
     },
   );
 
-  return { server, settingsStore, taskManager, dataDir: resolvedDataDir };
+  return { server, settingsStore, taskManager, boards, dataDir: resolvedDataDir };
 }
 
 async function main() {
