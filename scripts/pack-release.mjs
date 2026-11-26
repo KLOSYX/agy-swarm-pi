@@ -61,7 +61,9 @@ async function pack() {
   execFileSync('tar', ['-czf', tarPath, '-C', path.join(distDir, '.stage'), name], {
     stdio: 'inherit',
   });
-  execFileSync('zip', ['-rq', zipPath, '.'], {
+  const zipCommand = process.platform === 'win32' ? 'tar' : 'zip';
+  const zipArgs = process.platform === 'win32' ? ['--format', 'zip', '-cf', zipPath, '.'] : ['-rq', zipPath, '.'];
+  execFileSync(zipCommand, zipArgs, {
     cwd: stageDir,
     stdio: 'inherit',
   });

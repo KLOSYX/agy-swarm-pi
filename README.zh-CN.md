@@ -4,23 +4,30 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-在 **Google Antigravity** 中通过 `/swarm_pi` **直接并发调度外部 Pi**（`@mariozechner/pi-coding-agent`）执行编码、审查与调研任务——**零中间代理模型开销**，内置 Git Worktree 隔离、按角色模型/思考档位配置以及实时 **Pi Swarm 共享消息板**。
+在 **Google Antigravity** 中通过 `/swarm_pi` 直接并发调度 **Pi** 或 **Codex** 执行编码、审查与调研任务。先在设置中选择一个执行器，再通过 **Pi Swarm** 共享消息板查看进度与追加指令。
 
 ## 特性
 
-- **MCP 直调零代理层（`/swarm_pi`）**：由主对话直接调用 `swarm-pi_pi`（`pi_create_swarm` / `pi_swarm_post` / `pi_swarm_read`），不再额外消耗 `flash_lite` 等中间代理模型额度；免终端网络沙盒审批，具备 Fail-Closed 强熔断护栏。
-- **内置 Git Worktree 隔离**：`pi_submit_task(..., worktree: true)` 自动创建独立 worktree 与 `swarm-pi/*` 分支供并发写代码使用，完成后自动返回 `diff_stat` 与真实执行的 `actual_model`，并支持清理临时工作树。
-- **消息板、任务和设置面板（Pi Swarm）**：在 Antigravity 侧边栏或右上角 `+` 菜单打开 **Pi Swarm**，查看命名成员之间的消息、向成员追加指令，或查看并发 Pi 任务的实际模型、思考档位、工具调用、Worktree 变更与输出结果，并可在「模型与角色设置」页自定义全局默认与 `coder`/`verifier`/`researcher` 等角色预设。
-- **开箱即用零依赖**：仓库及 Release 包已内置打包好的单文件 MCP Server（`bin/server.bundle.mjs`）与单文件 MCP App UI（`ui/dist/settings.html`），目标机器无需执行 `npm install`，自动复用系统 Node.js 或 Antigravity 内置 `agy-node`。
+- **MCP 直调**。主对话通过 `swarm-pi_pi` 创建协作组、派发任务并读消息。所有任务使用设置中选定的执行器。找不到执行器时，插件会报告具体错误。
+- **Git Worktree 隔离**。`pi_submit_task(..., worktree: true)` 为并发写入创建独立 worktree 和 `swarm-pi/*` 分支。任务完成后可查看变更并清理工作树。
+- **共享消息板和角色设置**。在面板查看成员消息、任务结果、工具调用及执行器报告的模型。可为 `coder`、`verifier`、`researcher` 等角色配置模型、推理档位和超时。Pi 可配置工具白名单，Codex 可配置沙箱。
+- **预构建安装包**。仓库和 Release 包包含 MCP 服务与面板。Antigravity 直接通过 Node.js 启动服务。
 
 ---
 
 ## 前置要求
 
-目标机器需安装 Pi CLI 并配置对应模型 Provider 凭证：
+请确保 Antigravity 的 `PATH` 可以找到 Node.js 20 或更新版本。安装所选的 CLI 并配置对应认证。使用 Pi 时，需配置模型提供方凭证。
 
 ```bash
 npm install -g @mariozechner/pi-coding-agent
+```
+
+使用 Codex 时，插件复用 CLI 已保存的登录状态。模型字段留空时，使用 Codex CLI 的模型配置。
+
+```bash
+npm install -g @openai/codex
+codex login
 ```
 
 ---
@@ -56,6 +63,8 @@ git clone https://github.com/KLOSYX/agy-swarm-pi.git
 agy plugin install ./agy-swarm-pi
 ```
 
+在 Windows 上可在 PowerShell 中运行上面的 Antigravity CLI 安装命令。v0.4.0 起，MCP 服务由 `node` 直接启动。升级后如果侧边栏还没有入口，刷新 `swarm-pi_pi` 或重启 Antigravity，并确认同一环境可以运行 `node --version`。
+
 卸载：
 
 ```bash
@@ -67,10 +76,12 @@ agy plugin install ./agy-swarm-pi
 ## 使用说明
 
 1. 安装完成后，如客户端已打开，请在右上角 `... > MCP Servers` 刷新 `swarm-pi_pi`（或重启 Antigravity 窗口）。
-2. 在 Antigravity 侧边栏或对话右上角 `+` 菜单打开 **Pi Swarm**。面板默认使用英文，可在顶部 **Language** 中选择 **简体中文**。切换到 **模型与角色设置**，点击 **检测 Pi / 刷新模型**，设置全局默认及按角色的模型与思考档位并保存。
-3. 在对话中输入 `/swarm_pi <你的任务>`，协调器创建消息板、添加命名成员并派发任务。在 **Pi Swarm > 共享消息板** 查看成员和消息，选择成员并发送追加指令。空闲成员会接着原 Pi 会话处理，工作中的成员会依次处理排队消息。
+2. 在 Antigravity 侧边栏或对话右上角 `+` 菜单打开 **Pi Swarm**。在 **Language** 中可选择 **简体中文**。进入 **模型与角色设置**，在 **当前执行器** 中选 **Pi** 或 **Codex** 后保存。初始选项为 Pi。Codex 默认使用只读沙箱，内置 `coder` 角色可写入工作区。
+3. 在对话中输入 `/swarm_pi <你的任务>`，协调器创建消息板、添加命名成员并派发任务。在 **Pi Swarm > 共享消息板** 选择成员并发送追加指令。空闲成员接着原会话处理，工作中的成员依次处理排队消息。
 
-Pi worker 通过最终回复中的 `SWARM_POST @成员 消息` 交接。每轮 Pi 执行结束后，MCP 服务负责按成员投递，保留该成员的会话及工作区。消息板和排队状态随 MCP 进程存活。任务日志与 Pi 会话文件保存在插件数据目录。
+成员通过最终回复中的 `SWARM_POST @成员 消息` 交接。切换执行器前，请先等待任务完成或取消任务。旧看板可继续查看，切回原执行器后可继续发消息。
+
+消息板和队列随 MCP 进程存活。插件数据目录保留任务日志、Pi 会话文件和 Codex 会话 ID。Codex 会话正文由其 CLI 保存。Codex 的 JSONL 输出未上报实际模型，面板会单独显示配置模型。
 
 ---
 

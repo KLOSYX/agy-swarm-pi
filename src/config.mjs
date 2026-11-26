@@ -12,11 +12,25 @@ export const THINKING_LEVELS = [
 ];
 
 export const ROLE_THINKING_OPTIONS = ['inherit', ...THINKING_LEVELS];
+export const HARNESSES = ['pi', 'codex'];
+export const CODEX_THINKING_LEVELS = [
+  'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra',
+];
+export const TASK_THINKING_LEVELS = [...new Set([...THINKING_LEVELS, ...CODEX_THINKING_LEVELS])];
+export const CODEX_SANDBOX_MODES = ['read-only', 'workspace-write'];
+const INHERITED_HARNESS_SETTINGS = {
+  codexModel: '', codexThinking: '', codexSandbox: 'inherit',
+};
 
 export const DEFAULT_SETTINGS = {
   version: 1,
+  harness: 'pi',
   piPath: 'auto',
+  codexPath: 'auto',
   default: {
+    codexModel: '',
+    codexThinking: '',
+    codexSandbox: 'read-only',
     model: '',
     thinking: 'medium',
     tools: 'read,write,edit,bash',
@@ -24,18 +38,22 @@ export const DEFAULT_SETTINGS = {
   },
   roles: {
     coder: {
+      ...INHERITED_HARNESS_SETTINGS,
+      codexSandbox: 'workspace-write',
       model: '',
       thinking: 'medium',
       tools: 'read,write,edit,bash',
       timeoutSec: 900,
     },
     verifier: {
+      ...INHERITED_HARNESS_SETTINGS,
       model: '',
       thinking: 'high',
       tools: 'read,grep,find,ls,bash',
       timeoutSec: 600,
     },
     researcher: {
+      ...INHERITED_HARNESS_SETTINGS,
       model: '',
       thinking: 'low',
       tools: 'read,grep,find,ls',
@@ -43,6 +61,26 @@ export const DEFAULT_SETTINGS = {
     },
   },
 };
+
+function normalizeChoice(value, choices, fallback, field) {
+  if (value === undefined || value === null) return fallback;
+  const choice = String(value).trim().toLowerCase();
+  if (!choices.includes(choice)) {
+    throw new Error(`Invalid ${field} "${value}". Allowed: ${choices.join(', ')}`);
+  }
+  return choice;
+}
+
+function normalizeCodexSettings(input, fallback = {}, isRole = false) {
+  return {
+    codexModel: String(input?.codexModel ?? fallback.codexModel ?? '').trim(),
+    codexThinking: normalizeChoice(input?.codexThinking, ['', ...CODEX_THINKING_LEVELS],
+      fallback.codexThinking ?? '', 'Codex reasoning effort'),
+    codexSandbox: normalizeChoice(input?.codexSandbox,
+      isRole ? ['inherit', ...CODEX_SANDBOX_MODES] : CODEX_SANDBOX_MODES,
+      fallback.codexSandbox ?? 'inherit', 'Codex sandbox mode'),
+  };
+}
 
 function cloneDefaults() {
   return structuredClone(DEFAULT_SETTINGS);
@@ -96,6 +134,7 @@ function normalizeRoleName(name) {
 
 function normalizeRolePreset(input, fallbackPreset = {}) {
   return {
+    ...normalizeCodexSettings(input, fallbackPreset, true),
     model:
       input?.model !== undefined
         ? String(input.model).trim()
@@ -126,6 +165,7 @@ export function normalizeSettings(raw) {
 
   const defRaw = raw.default && typeof raw.default === 'object' ? raw.default : {};
   const normalizedDefault = {
+    ...normalizeCodexSettings(defRaw, base.default),
     model:
       defRaw.model !== undefined
         ? String(defRaw.model).trim()
@@ -148,7 +188,9 @@ export function normalizeSettings(raw) {
 
   return {
     version: 1,
+    harness: normalizeChoice(raw.harness, HARNESSES, base.harness, 'harness'),
     piPath,
+    codexPath: String(raw.codexPath ?? '').trim() || base.codexPath,
     default: normalizedDefault,
     roles,
   };
@@ -157,6 +199,28 @@ export function normalizeSettings(raw) {
 export function resolveEffectiveProfile(settings, overrides = {}) {
   const roleName = overrides.role ? normalizeRoleName(overrides.role) : null;
   const rolePreset = roleName ? settings.roles?.[roleName] : undefined;
+  const harness = settings.harness ?? 'pi';
+  let timeoutSec = rolePreset?.timeoutSec ?? settings.default.timeoutSec;
+  if (overrides.timeoutSec !== undefined && overrides.timeoutSec !== null) {
+    timeoutSec = clampTimeout(overrides.timeoutSec, timeoutSec);
+  }
+  const common = { role: roleName, roleFound: Boolean(rolePreset), harness, timeoutSec };
+
+  if (harness === 'codex') {
+    if (overrides.tools?.trim()) {
+      throw new Error('The tools allowlist is supported by Pi only. Set the Codex sandbox in the role or global settings.');
+    }
+    const sandbox = rolePreset?.codexSandbox;
+    const thinking = overrides.thinking ? normalizeChoice(overrides.thinking, CODEX_THINKING_LEVELS,
+      '', 'Codex reasoning effort') : (rolePreset?.codexThinking || settings.default.codexThinking);
+    return {
+      ...common,
+      model: String(overrides.model ?? '').trim() || rolePreset?.codexModel || settings.default.codexModel,
+      thinking,
+      tools: '',
+      sandbox: sandbox && sandbox !== 'inherit' ? sandbox : settings.default.codexSandbox,
+    };
+  }
 
   const model =
     overrides.model !== undefined && String(overrides.model).trim() !== ''
@@ -185,21 +249,11 @@ export function resolveEffectiveProfile(settings, overrides = {}) {
     tools = normalizeTools(overrides.tools, tools);
   }
 
-  let timeoutSec = settings.default.timeoutSec;
-  if (rolePreset?.timeoutSec) {
-    timeoutSec = rolePreset.timeoutSec;
-  }
-  if (overrides.timeoutSec !== undefined && overrides.timeoutSec !== null) {
-    timeoutSec = clampTimeout(overrides.timeoutSec, timeoutSec);
-  }
-
   return {
-    role: roleName,
-    roleFound: Boolean(rolePreset),
+    ...common,
     model,
     thinking,
     tools,
-    timeoutSec,
   };
 }
 
@@ -245,6 +299,9 @@ export class SettingsStore {
 
     if (patchInput.piPath !== undefined) {
       merged.piPath = patchInput.piPath;
+    }
+    if (patchInput.codexPath !== undefined) {
+      merged.codexPath = patchInput.codexPath;
     }
     if (patchInput.default && typeof patchInput.default === 'object') {
       merged.default = {

@@ -1,9 +1,9 @@
 {
   "mcpServers": {
     "pi": {
-      "command": "bash",
+      "command": "node",
       "args": [
-        "${PLUGIN_ROOT}/bin/start-server.sh",
+        "${PLUGIN_ROOT}/bin/server.bundle.mjs",
         "--data-dir",
         "${PLUGIN_DATA}"
       ]

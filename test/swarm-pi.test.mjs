@@ -3,8 +3,10 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
   DEFAULT_SETTINGS,
@@ -18,6 +20,7 @@ import {
   parsePiJsonOutput,
 } from '../src/pi-runner.mjs';
 import { createSwarmPiServer } from '../src/server.mjs';
+import { buildCodexArgs, parseCodexJsonOutput } from '../src/codex-runner.mjs';
 
 async function withTempDir(fn) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'swarm-pi-test-'));
@@ -29,7 +32,7 @@ async function withTempDir(fn) {
 }
 
 async function createMockPiBinary(dir) {
-  const binPath = path.join(dir, 'mock-pi');
+  const binPath = path.join(dir, process.platform === 'win32' ? 'mock-pi.cjs' : 'mock-pi');
   const script = `#!/usr/bin/env node
 const fs = require('node:fs');
 const path = require('node:path');
@@ -124,6 +127,104 @@ test('SettingsStore persists and resolves default + role + override precedence',
       /Invalid thinking level/,
     );
   });
+});
+
+test('legacy Pi presets and Codex role settings resolve independently', async () => {
+  await withTempDir(async (dir) => {
+    const store = new SettingsStore(dir);
+    await fs.writeFile(store.filePath, JSON.stringify({
+      version: 1, default: { model: 'pi-configured', thinking: 'off' },
+      roles: { coder: { model: 'pi-coder', tools: 'read,bash', timeoutSec: 120 } },
+    }));
+    const initial = await store.load();
+    assert.equal(initial.harness, 'pi');
+    assert.equal(resolveEffectiveProfile(initial, { role: 'coder' }).model, 'pi-coder');
+    const selected = await store.save({
+      ...initial, harness: 'codex',
+      default: { ...initial.default, codexModel: 'codex-configured' },
+    });
+    const coder = resolveEffectiveProfile(selected, { role: 'coder', thinking: 'ultra' });
+    assert.equal(coder.model, 'codex-configured');
+    assert.equal(coder.thinking, 'ultra');
+    assert.equal(coder.tools, '');
+    assert.equal(coder.timeoutSec, 120);
+    assert.equal(coder.sandbox, 'workspace-write');
+    assert.equal(resolveEffectiveProfile(selected).sandbox, 'read-only');
+    assert.throws(() => resolveEffectiveProfile(selected, { tools: 'read' }), /Pi only/);
+    await assert.rejects(() => store.save({ ...selected, harness: 'both' }), /Invalid harness/);
+  });
+});
+
+test('only the panel selects a harness, active work blocks switches, and old boards cannot dispatch', async () => {
+  await withTempDir(async (dir) => {
+    const { server, settingsStore, taskManager } = createSwarmPiServer({ dataDir: path.join(dir, 'data') });
+    const piPath = await createMockPiBinary(dir);
+    await settingsStore.patch({ piPath, codexPath: path.join(dir, 'missing-codex') });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'harness-settings', version: '1.0.0' });
+    try {
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+      const call = (name, args = {}) => client.callTool({ name, arguments: args });
+      const initial = (await call('pi_get_settings')).structuredContent.settings;
+      const setCodex = () => call('app_save_settings', { settings: { ...initial, harness: 'codex' } });
+      const boardArgs = { title: 'Swarm', cwd: dir, members: [{ name: 'worker' }] };
+      const piBoard = (await call('pi_create_swarm', boardArgs)).structuredContent;
+      assert.equal(piBoard.harness, 'pi');
+      const modelTools = (await client.listTools()).tools;
+      assert.equal(modelTools.find(({ name }) => name === 'pi_update_settings').inputSchema.properties.harness, undefined);
+      assert.equal(modelTools.find(({ name }) => name === 'pi_submit_task').inputSchema.properties.harness, undefined);
+
+      const active = await taskManager.submit({ prompt: 'SLEEP_LONG', cwd: dir });
+      try {
+        const switchAttempt = await setCodex();
+        assert.equal(switchAttempt.isError, true);
+        assert.match(switchAttempt.content[0].text, /before switching harnesses/);
+      } finally {
+        await taskManager.cancel(active.task_id);
+      }
+      assert.equal((await setCodex()).structuredContent.settings.harness, 'codex');
+      const refused = await call('pi_swarm_post', { boardId: piBoard.id, to: 'worker', text: 'Continue' });
+      assert.equal(refused.isError, true);
+      assert.match(refused.content[0].text, /This swarm uses pi/);
+      assert.equal((await call('pi_create_swarm', boardArgs)).structuredContent.harness, 'codex');
+      assert.equal((await call('pi_list_models')).isError, true);
+      assert.equal((await call('app_refresh_models')).structuredContent.settings.harness, 'codex');
+      const missing = await call('pi_submit_task', { prompt: 'Hello', cwd: dir });
+      assert.equal(missing.isError, true);
+      assert.match(missing.content[0].text, /Codex executable not found/);
+      assert.equal(taskManager.listTasks().length, 1);
+    } finally {
+      await client.close();
+    }
+  });
+});
+
+test('Codex uses stdin and parses completion, usage, and terminal errors', () => {
+  const threadId = '0199a213-81c0-7800-8aa1-bbab2a035a53';
+  const options = { model: 'my-model', sandbox: 'read-only', thinking: 'high', outputPath: '/output with spaces' };
+  assert.deepEqual(buildCodexArgs({ ...options, sessionPath: '/session', threadId }), [
+    'exec', 'resume', threadId, '--json', '--skip-git-repo-check', '--output-last-message', '/output with spaces',
+    '-c', 'approval_policy="never"', '-c', 'sandbox_mode="read-only"', '--model', 'my-model',
+    '-c', 'model_reasoning_effort="high"', '-',
+  ]);
+  assert.ok(buildCodexArgs(options).includes('--ephemeral'));
+  const output = [
+    'CLI prelude',
+    JSON.stringify({ type: 'thread.started', thread_id: threadId }),
+    '{"type":"error","message":"Reconnecting"}',
+    '{"type":"item.completed","item":{"type":"command_execution"}}',
+    '{"type":"item.completed","item":{"type":"mcp_tool_call","server":"demo","tool":"status"}}',
+  ].join('\r\n');
+  const done = parseCodexJsonOutput(`${output}\n{"type":"turn.completed","usage":{"input_tokens":20}}`);
+  assert.equal(done.threadId, threadId);
+  assert.deepEqual(done.toolCalls, ['command_execution', 'demo/status']);
+  assert.deepEqual(done.usage, { input_tokens: 20 });
+  assert.equal(done.actualModel, null);
+  assert.equal(done.errorText, '');
+  assert.equal(done.completed, true);
+  const failed = parseCodexJsonOutput(`${output}\n{"type":"turn.failed","error":{"message":"Login failed"}}`);
+  assert.equal(failed.completed, false);
+  assert.equal(failed.errorText, 'Login failed');
 });
 
 test('buildPiArgs, parsePiJsonOutput, and parseListModelsOutput handle edge cases', () => {
@@ -276,7 +377,7 @@ test('PiTaskManager supports batch waitTasks, sessions, worktree isolation, clea
 test('MCP server exposes task tools and serves the bundled Pi Swarm MCP App', async () => {
   await withTempDir(async (dir) => {
     const uiDistPath = path.resolve(
-      path.dirname(new URL(import.meta.url).pathname),
+      path.dirname(fileURLToPath(import.meta.url)),
       '..',
       'ui',
       'dist',
@@ -370,5 +471,31 @@ test('panel language defaults to English and survives reconnects independently o
     await withServer(async (call) => {
       assert.equal((await call('open_pi_swarm_settings')).structuredContent.language, 'en');
     });
+  });
+});
+
+test('the plugin manifest starts the bundled MCP panel directly with Node', async () => {
+  await withTempDir(async (dir) => {
+    const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+    const data = path.join(dir, 'plugin data with spaces');
+    const config = JSON.parse(await fs.readFile(path.join(root, 'mcp_config.json'), 'utf8')).mcpServers.pi;
+    assert.equal(config.command, 'node');
+    const transport = new StdioClientTransport({
+      command: config.command,
+      args: config.args.map((arg) => arg.replace('${PLUGIN_ROOT}', root).replace('${PLUGIN_DATA}', data)),
+    });
+    const client = new Client({ name: 'bundle-smoke', version: '1.0.0' });
+    try {
+      await client.connect(transport);
+      const tools = (await client.listTools()).tools;
+      const panel = tools.find(({ name }) => name === 'open_pi_swarm_settings');
+      assert.ok(panel?._meta?.['com.google.antigravity/ui']?.entrypoints.some(({ type }) => type === 'aux_pane'));
+      const app = await client.readResource({ uri: 'ui://swarm-pi/settings.html' });
+      assert.match(app.contents[0].text, /Active harness/);
+      const result = await client.callTool({ name: 'pi_get_settings', arguments: {} });
+      assert.equal(result.structuredContent.settingsPath, path.join(data, 'settings.json'));
+    } finally {
+      await client.close();
+    }
   });
 });
