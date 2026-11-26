@@ -13,13 +13,17 @@ import {
 } from '@modelcontextprotocol/ext-apps/server';
 import { z } from 'zod';
 import {
+  CODEX_SANDBOX_MODES,
+  CODEX_THINKING_LEVELS,
   DEFAULT_SETTINGS,
   ROLE_THINKING_OPTIONS,
   SettingsStore,
+  TASK_THINKING_LEVELS,
   THINKING_LEVELS,
 } from './config.mjs';
 import { SwarmBoards } from './board.mjs';
 import { PiTaskManager, resolvePiExecutable } from './pi-runner.mjs';
+import { resolveCodexExecutable } from './codex-runner.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = process.env.PLUGIN_ROOT || path.resolve(__dirname, '..');
@@ -90,22 +94,28 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
     settingsStore,
   });
 
-  const boards = new SwarmBoards(taskManager);
+  const boards = new SwarmBoards(taskManager, settingsStore);
   const server = new McpServer({
     name: 'swarm-pi',
-    version: '0.3.1',
+    version: '0.4.0',
   });
 
   async function buildAppState(extra = {}) {
     const [settings, language] = await Promise.all([settingsStore.load(), loadLanguage()]);
-    const piStatus = await resolvePiExecutable(settings.piPath);
+    const [piStatus, codexStatus] = await Promise.all([
+      resolvePiExecutable(settings.piPath),
+      resolveCodexExecutable(settings.codexPath),
+    ]);
     return {
       language,
       settings,
       defaults: DEFAULT_SETTINGS,
       thinkingLevels: THINKING_LEVELS,
       roleThinkingOptions: ROLE_THINKING_OPTIONS,
+      codexThinkingLevels: CODEX_THINKING_LEVELS,
+      codexSandboxModes: CODEX_SANDBOX_MODES,
       piStatus,
+      codexStatus,
       modelsCache: taskManager.modelsCache,
       recentTasks: taskManager.listTasks({ limit: 25 }),
       settingsPath: settingsStore.filePath,
@@ -190,7 +200,7 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
         const running = state.recentTasks.filter((t) => t.status === 'running').length;
         return jsonToolResult(
           state,
-          `Opened Pi Swarm panel (tab=${tab || 'auto'}, runningTasks=${running}, pi=${state.piStatus.found ? state.piStatus.path : 'not found'}).`,
+          `Opened Pi Swarm panel (tab=${tab || 'auto'}, runningTasks=${running}, harness=${state.settings.harness}).`,
         );
       } catch (err) {
         return errorToolResult(err);
@@ -260,7 +270,7 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
     },
     async ({ settings }) => {
       try {
-        await settingsStore.save(settings);
+        await taskManager.updateSettings(settings, { fromPanel: true });
         const state = await buildAppState();
         return jsonToolResult(state, 'Settings saved.');
       } catch (err) {
@@ -273,8 +283,8 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
     server,
     'app_refresh_models',
     {
-      title: 'Refresh Pi Models',
-      description: 'App-only tool to re-probe Pi executable and run pi --list-models.',
+      title: 'Refresh Harness Availability',
+      description: 'App-only tool to check executables and refresh the model list when Pi is selected.',
       inputSchema: {},
       _meta: {
         ui: {
@@ -284,7 +294,9 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
     },
     async () => {
       try {
-        await taskManager.listModels({ refresh: true });
+        if ((await settingsStore.load()).harness === 'pi') {
+          await taskManager.listModels({ refresh: true });
+        }
         return jsonToolResult(await buildAppState());
       } catch (err) {
         return errorToolResult(err);
@@ -364,7 +376,10 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
   }
 
   const readBoardShape = { boardId, after: z.number().int().nonnegative().optional() };
-  const readAppBoard = ({ boardId, after }) => ({ ...boards.read(boardId, after), boards: boards.list() });
+  const readAppBoard = ({ boardId, after }) => ({
+    ...(boardId ? boards.read(boardId, after) : {}),
+    boards: boards.list(),
+  });
   boardTool('pi_create_swarm', 'Create a shared Pi Swarm board and its named worker roster.', {
     title: z.string().trim().min(1).max(120),
     cwd: z.string(),
@@ -374,8 +389,8 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
       brief: z.string().max(4000).optional(),
       worktree: z.boolean().optional(),
       model: z.string().optional(),
-      thinking: z.enum(THINKING_LEVELS).optional(),
-      tools: z.string().optional(),
+      thinking: z.enum(TASK_THINKING_LEVELS).optional(),
+      tools: z.string().optional().describe('Pi only. Omit when Codex is selected.'),
       timeoutSec: z.number().int().min(10).max(7200).optional(),
     })).min(1).max(12),
   }, (args) => boards.create(args));
@@ -386,7 +401,8 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
     ({ boardId, after, waitMs }) => boards.waitForMessages(boardId, after, waitMs));
   boardTool('pi_swarm_close', 'Close an idle Pi Swarm and release its worktrees for cleanup.', { boardId },
     ({ boardId }) => boards.close(boardId));
-  boardTool('app_read_board', 'Read Pi Swarm board updates.', readBoardShape, readAppBoard, true);
+  boardTool('app_read_board', 'List swarms or read updates to a selected board.',
+    { ...readBoardShape, boardId: boardId.optional() }, readAppBoard, true);
   boardTool('app_post_board', 'Post a user message and wake or queue the named Pi worker.', postShape,
     ({ boardId, to, text }) => boards.post(boardId, 'user', to, text), true);
 
@@ -395,7 +411,7 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
     {
       title: 'Get Pi Swarm Settings',
       description:
-        'Inspect current Pi Swarm settings (piPath, default model/thinking/tools, role presets) and check whether the pi binary is available.',
+        'Inspect the selected external harness, Pi and Codex executable availability, and model and role settings. The harness is selected in the Pi Swarm panel.',
       inputSchema: {},
     },
     async () => {
@@ -403,6 +419,7 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
         const state = await buildAppState();
         return jsonToolResult({
           piStatus: state.piStatus,
+          codexStatus: state.codexStatus,
           settings: state.settings,
           settingsPath: state.settingsPath,
         });
@@ -417,14 +434,18 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
     {
       title: 'Update Pi Swarm Settings',
       description:
-        'Update Pi Swarm global defaults or per-role presets (model, thinking level, tools, timeoutSec, piPath).',
+            'Update Swarm executable paths and model, reasoning, sandbox, tool, and timeout presets.',
       inputSchema: {
         piPath: z.string().optional().describe('Path to pi binary or "auto"'),
+        codexPath: z.string().optional().describe('Path to the Codex CLI or "auto"'),
         default: z
           .object({
             model: z.string().optional(),
             thinking: z.enum(THINKING_LEVELS).optional(),
             tools: z.string().optional(),
+            codexModel: z.string().optional(),
+            codexThinking: z.enum(['', ...CODEX_THINKING_LEVELS]).optional(),
+            codexSandbox: z.enum(CODEX_SANDBOX_MODES).optional(),
             timeoutSec: z.number().int().min(10).max(7200).optional(),
           })
           .optional(),
@@ -435,6 +456,9 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
                 model: z.string().optional(),
                 thinking: z.enum(ROLE_THINKING_OPTIONS).optional(),
                 tools: z.string().optional(),
+                codexModel: z.string().optional(),
+                codexThinking: z.enum(['', ...CODEX_THINKING_LEVELS]).optional(),
+                codexSandbox: z.enum(['inherit', ...CODEX_SANDBOX_MODES]).optional(),
                 timeoutSec: z.number().int().min(10).max(7200).nullable().optional(),
               })
               .nullable(),
@@ -445,9 +469,9 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
     },
     async (args) => {
       try {
-        const updated = await settingsStore.patch(args);
-        const piStatus = await resolvePiExecutable(updated.piPath);
-        return jsonToolResult({ piStatus, settings: updated });
+        await taskManager.updateSettings(args);
+        const { piStatus, codexStatus, settings } = await buildAppState();
+        return jsonToolResult({ piStatus, codexStatus, settings });
       } catch (err) {
         return errorToolResult(err);
       }
@@ -458,7 +482,7 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
     'pi_list_models',
     {
       title: 'List Pi Models',
-      description: 'Run `pi --list-models` to inspect available provider/model identifiers.',
+      description: 'Run `pi --list-models` when Pi is the selected harness.',
       inputSchema: {
         refresh: z.boolean().optional().describe('Bypass cache and re-run pi --list-models'),
       },
@@ -476,11 +500,11 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
   server.registerTool(
     'pi_submit_task',
     {
-      title: 'Submit Async Pi Task',
+      title: 'Submit Async Worker Task',
       description:
-        'Start an external Pi coding agent task asynchronously in the given workspace directory (or an isolated git worktree when worktree=true), applying configured role presets or explicit overrides.',
+        'Start a task with the external harness selected in Settings. Use worktree=true for an isolated git worktree. The role and task overrides configure that harness.',
       inputSchema: {
-        prompt: z.string().describe('Task prompt for Pi'),
+        prompt: z.string().describe('Task prompt for the selected harness'),
         cwd: z.string().describe('Absolute path to the workspace directory'),
         label: z
           .string()
@@ -496,15 +520,15 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
           .describe('Set true to isolate concurrent editing tasks in a dedicated git worktree & branch'),
         model: z.string().optional().describe('Optional model override'),
         thinking: z
-          .enum(THINKING_LEVELS)
+          .enum(TASK_THINKING_LEVELS)
           .optional()
           .describe('Optional thinking level override'),
-        tools: z.string().optional().describe('Optional comma-separated Pi tool allowlist'),
+        tools: z.string().optional().describe('Optional comma-separated tool allowlist for Pi. Omit when Codex is selected.'),
         timeoutSec: z.number().int().min(10).max(7200).optional(),
         sessionKey: z
           .string()
           .optional()
-          .describe('Stable session key to preserve Pi conversation across follow-up turns'),
+          .describe('Stable session key to continue the selected harness conversation. For a worktree, pass its effective cwd on follow-up turns.'),
       },
     },
     async (args) => {
@@ -520,9 +544,9 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
   server.registerTool(
     'pi_poll_task',
     {
-      title: 'Poll Async Pi Task',
+      title: 'Poll Async Worker Task',
       description:
-        'Wait for or check the status and output of a single submitted Pi task. Uses long-polling up to waitMs (default 15000ms).',
+        'Wait for or check the status and output of a submitted worker task. Uses long-polling up to waitMs (default 15000ms).',
       inputSchema: {
         taskId: z.string().describe('Task ID returned by pi_submit_task'),
         waitMs: z
@@ -549,9 +573,9 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
   server.registerTool(
     'pi_wait_tasks',
     {
-      title: 'Wait For Multiple Pi Tasks',
+      title: 'Wait For Multiple Worker Tasks',
       description:
-        'Wait on a batch of parallel Pi tasks (mode="all" waits for all tasks or waitMs timeout; mode="any" wakes when any task finishes). Returns status, actual_model, worktree diff stat, and results for every task.',
+        'Wait on parallel worker tasks (mode="all" waits for all tasks or waitMs timeout; mode="any" wakes when any task finishes). Returns status, reported model, worktree diff stat, and results.',
       inputSchema: {
         taskIds: z
           .array(z.string())
@@ -586,8 +610,8 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
   server.registerTool(
     'pi_cancel_task',
     {
-      title: 'Cancel Async Pi Task',
-      description: 'Terminate a running Pi task by taskId.',
+      title: 'Cancel Async Worker Task',
+      description: 'Terminate a running worker task by taskId.',
       inputSchema: {
         taskId: z.string(),
       },

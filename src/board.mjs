@@ -7,8 +7,9 @@ const ROUTE = /^SWARM_POST @([a-z0-9_-]+) (.+)$/;
 const HOST_MEMBERS = new Set(['coordinator', 'user', 'system']);
 
 export class SwarmBoards {
-  constructor(taskManager) {
+  constructor(taskManager, settingsStore) {
     this.taskManager = taskManager;
+    this.settingsStore = settingsStore;
     this.boards = new Map();
   }
 
@@ -26,7 +27,8 @@ export class SwarmBoards {
       });
     }
     const id = randomUUID();
-    const board = { id, title, roster, messages: [], waiters: new Set(), closed: false };
+    const { harness } = await this.settingsStore.load();
+    const board = { id, title, harness, roster, messages: [], waiters: new Set(), closed: false };
     this.boards.set(id, board);
     return this.snapshot(board);
   }
@@ -38,7 +40,7 @@ export class SwarmBoards {
   }
 
   list() {
-    return Array.from(this.boards.values(), ({ id, title, closed }) => ({ id, title, closed })).reverse();
+    return Array.from(this.boards.values(), ({ id, title, harness, closed }) => ({ id, title, harness, closed })).reverse();
   }
 
   read(id, after = 0) {
@@ -74,12 +76,16 @@ export class SwarmBoards {
     return this.snapshot(board);
   }
 
-  post(id, from, to, text) {
+  async post(id, from, to, text) {
     const board = this.get(id);
-    if (board.closed) throw new Error('This Pi Swarm is closed');
     if (to !== 'coordinator' && !board.roster.has(to)) {
       throw new Error(`Unknown recipient: @${to}`);
     }
+    const { harness } = await this.settingsStore.load();
+    if (board.harness !== harness) {
+      throw new Error(`This swarm uses ${board.harness}. Select ${board.harness} in Settings to continue it, or create a new swarm for ${harness}.`);
+    }
+    if (board.closed) throw new Error('This Pi Swarm is closed');
     this.deliver(board, { from, to, text, budget: { remaining: MAX_HANDOFFS } });
     return this.snapshot(board);
   }
@@ -124,6 +130,7 @@ export class SwarmBoards {
           model: member.model, thinking: member.thinking, tools: member.tools,
           timeoutSec: member.timeoutSec, worktree: member.worktree && !member.worktreeTaskId,
           sessionKey: `board-${board.id}-${member.name}`, finishOnSettled: true,
+          expectedHarness: board.harness,
         });
         member.taskId = task.task_id;
         if (task.worktree) {
@@ -134,7 +141,7 @@ export class SwarmBoards {
         const result = await this.taskManager.waitForCompletion(task.task_id);
         member.actualModel = result.actual_model;
         if (result.status !== 'completed' || result.error_text || !result.result_text.trim()) {
-          throw new Error(result.error_text || `Pi ended with ${result.status} and no usable reply`);
+          throw new Error(result.error_text || `${board.harness} ended with ${result.status} and no usable reply`);
         }
         const feedback = [];
         const handoffs = [];
@@ -179,7 +186,7 @@ export class SwarmBoards {
 
   snapshot(board, after = 0) {
     return {
-      id: board.id, title: board.title, closed: board.closed,
+      id: board.id, title: board.title, harness: board.harness, closed: board.closed,
       members: [...board.roster.values()].map((member) => ({
         name: member.name, role: member.role, status: member.status,
         queued: member.queue.length, turns: member.turns, actualModel: member.actualModel,

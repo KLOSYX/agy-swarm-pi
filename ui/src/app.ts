@@ -5,16 +5,23 @@ import {
 } from '@modelcontextprotocol/ext-apps';
 import { panelText, thinkingLabel, type Language } from './locale';
 
+type Harness = 'pi' | 'codex';
+
 interface Profile {
   model: string;
   thinking: string;
   tools: string;
   timeoutSec: number | null;
+  codexModel: string;
+  codexThinking: string;
+  codexSandbox: string;
 }
 
 interface Settings {
   version: number;
+  harness: Harness;
   piPath: string;
+  codexPath: string;
   default: Profile;
   roles: Record<string, Profile>;
 }
@@ -34,6 +41,7 @@ interface TaskSnapshot {
   label: string | null;
   prompt_preview: string;
   status: 'running' | 'completed' | 'failed' | 'cancelled';
+  harness: Harness;
   cwd: string;
   worktree: WorktreeInfo | null;
   profile: { role: string | null; model: string; thinking: string; tools: string };
@@ -52,6 +60,7 @@ type Tab = 'board' | 'tasks' | 'settings';
 interface BoardSummary {
   id: string;
   title: string;
+  harness: Harness;
   closed: boolean;
 }
 
@@ -90,7 +99,10 @@ interface AppState {
   defaults: Settings;
   thinkingLevels: string[];
   roleThinkingOptions: string[];
+  codexThinkingLevels: string[];
+  codexSandboxModes: string[];
   piStatus: { found: boolean; path: string | null; searched: string[] };
+  codexStatus: AppState['piStatus'];
   modelsCache: {
     updatedAt: string | null;
     models: Array<{ id: string; raw: string }>;
@@ -104,7 +116,8 @@ interface AppState {
 }
 
 const root = document.getElementById('app') as HTMLElement;
-const app = new App({ name: 'Pi Swarm', version: '0.3.1' }, {});
+const app = new App({ name: 'Pi Swarm', version: '0.4.0' }, {});
+const harnessName = { pi: 'Pi', codex: 'Codex' };
 
 let state: AppState | null = null;
 let language: Language = 'en';
@@ -235,8 +248,8 @@ function renderBoardFeed(current: Board): string {
 }
 
 function boardOptions(boards: BoardSummary[]): string {
-  return boards.map(({ id, title, closed }) =>
-    `<option value="${escapeHtml(id)}" ${id === boardId ? 'selected' : ''}>${escapeHtml(title)}${closed ? ` · ${labels.closed}` : ''}</option>`,
+  return boards.map(({ id, title, harness, closed }) =>
+    `<option value="${escapeHtml(id)}" ${id === boardId ? 'selected' : ''}>${escapeHtml(title)} · ${harnessName[harness]}${closed ? ` · ${labels.closed}` : ''}</option>`,
   ).join('');
 }
 
@@ -245,6 +258,7 @@ function renderBoardTab(current: AppState): string {
     return `<div class="card">${labels.noBoard}</div>`;
   }
   const selected = board?.id === boardId ? board : null;
+  const inactive = selected && selected.harness !== current.settings.harness;
   return `<div class="card">
     <label for="board-select">${labels.swarm}</label>
     <select id="board-select">
@@ -252,7 +266,8 @@ function renderBoardTab(current: AppState): string {
     </select>
     <div id="board-error" role="status">${escapeHtml(boardError)}</div>
     <div id="board-feed">${selected ? renderBoardFeed(selected) : labels.loadingMessages}</div>
-    ${selected && !selected.closed ? `<form id="board-form">
+    ${inactive && !selected.closed ? `<p class="hint">${labels.inactiveBoard(harnessName[selected.harness])}</p>` : ''}
+    ${selected && !selected.closed && !inactive ? `<form id="board-form">
       <label for="board-recipient">${labels.recipient}</label>
       <select id="board-recipient">
         ${selected.members.map(({name}) => `<option value="${escapeHtml(name)}">@${escapeHtml(name)}</option>`).join('')}
@@ -298,13 +313,23 @@ function showBoardError(message: string) {
 
 async function refreshBoard() {
   const id = boardId;
-  if (!id || activeTab !== 'board') return;
+  if (activeTab !== 'board') return;
   try {
     const after = board?.id === id ? board.messages.at(-1)?.number || 0 : 0;
-    const result = await app.callServerTool({ name: 'app_read_board', arguments: { boardId: id, after } });
-    if (boardId !== id) return;
+    const result = await app.callServerTool({ name: 'app_read_board', arguments: id ? { boardId: id, after } : {} });
+    if (boardId !== id || activeTab !== 'board') return;
     if (result.isError) throw new Error(result.content.map((item) => 'text' in item ? item.text : '').join(' '));
-    if (result.structuredContent) updateBoardView(result.structuredContent as unknown as BoardView);
+    if (!result.structuredContent) return;
+    if (id) {
+      updateBoardView(result.structuredContent as unknown as BoardView);
+    } else {
+      const { boards } = result.structuredContent as { boards: BoardSummary[] };
+      if (state && boards.length) {
+        state.boards = boards;
+        boardId = boards[0].id;
+        render();
+      }
+    }
     if (!composing) showBoardError('');
   } catch (error) {
     if (boardId === id) showBoardError(error instanceof Error ? error.message : String(error));
@@ -315,8 +340,11 @@ async function refreshBoard() {
 
 function scheduleBoardRefresh() {
   if (boardTimer !== null) window.clearTimeout(boardTimer);
-  boardTimer = activeTab === 'board' && boardId
-    ? window.setTimeout(refreshBoard, board?.lastMessage && (board.messages.at(-1)?.number || 0) < board.lastMessage ? 50 : 2000)
+  const catchingUp = boardId && (
+    board?.id !== boardId || (board.messages.at(-1)?.number || 0) < board.lastMessage
+  );
+  boardTimer = activeTab === 'board'
+    ? window.setTimeout(refreshBoard, catchingUp ? 50 : 2000)
     : null;
 }
 
@@ -341,7 +369,7 @@ function renderTasksTab(current: AppState): string {
       ${tasks
         .map((t) => {
           const displayTitle = t.label || t.task_id;
-          const configuredModel = t.profile.model || labels.piDefault;
+          const configuredModel = t.profile.model || labels.harnessDefault(harnessName[t.harness]);
           const actualModel = t.actual_model || (t.status === 'running' ? labels.starting : labels.modelNotReported);
           const toolCounts = t.tool_calls.reduce<Record<string, number>>((acc, name) => {
             acc[name] = (acc[name] || 0) + 1;
@@ -356,6 +384,7 @@ function renderTasksTab(current: AppState): string {
               <div class="card-header">
                 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                   <span class="role-badge">${escapeHtml(t.profile.role || labels.defaultRole)}</span>
+                  <span class="hint">${harnessName[t.harness]}</span>
                   <strong>${escapeHtml(displayTitle)}</strong>
                   <span class="hint mono">${escapeHtml(t.task_id)}</span>
                 </div>
@@ -377,7 +406,7 @@ function renderTasksTab(current: AppState): string {
               <div class="meta-row">
                 <span>${labels.configuredModel}: <span class="mono">${escapeHtml(configuredModel)}</span></span>
                 <span>${labels.actualModel}: <strong class="mono">${escapeHtml(actualModel)}</strong></span>
-                <span>${labels.thinking}: <span class="mono">${escapeHtml(thinkingLabel(language, t.profile.thinking))}</span></span>
+                <span>${labels.thinking}: <span class="mono">${escapeHtml(t.profile.thinking ? thinkingLabel(language, t.profile.thinking) : labels.cliDefault)}</span></span>
               </div>
 
               ${
@@ -416,9 +445,37 @@ function renderTasksTab(current: AppState): string {
     </div>`;
 }
 
+function renderCodexFields(current: AppState, profile: Profile, roleName?: string): string {
+  const scope = (field: 'codexModel' | 'codexThinking' | 'codexSandbox') =>
+    roleName ? `data-role-field="${field}" data-role-name="${escapeHtml(roleName)}"` : `data-codex-default="${field}"`;
+  const fallback = roleName ? labels.inheritDefault : labels.cliDefault;
+  return `
+    <div class="field">
+      <label>${labels.codexModel}</label>
+      <input type="text" ${scope('codexModel')} value="${escapeHtml(profile.codexModel)}" placeholder="${fallback}" />
+    </div>
+    <div class="field">
+      <label>${labels.codexThinking}</label>
+      <select ${scope('codexThinking')}>
+        <option value="">${fallback}</option>
+        ${current.codexThinkingLevels.map((level) =>
+          `<option value="${level}" ${profile.codexThinking === level ? 'selected' : ''}>${escapeHtml(thinkingLabel(language, level))}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field">
+      <label>${labels.codexSandbox}</label>
+      <select ${scope('codexSandbox')}>
+        ${roleName ? '<option value="inherit">' + labels.inheritDefault + '</option>' : ''}
+        ${current.codexSandboxModes.map((mode) =>
+          `<option value="${mode}" ${profile.codexSandbox === mode ? 'selected' : ''}>${mode}</option>`).join('')}
+      </select>
+    </div>`;
+}
+
 function renderSettingsTab(current: AppState, currentDraft: Settings): string {
   const models = current.modelsCache.models || [];
   const roleEntries = Object.entries(currentDraft.roles || {});
+  const codex = currentDraft.harness === 'codex';
 
   return `
     <datalist id="pi-models-datalist">
@@ -431,14 +488,23 @@ function renderSettingsTab(current: AppState, currentDraft: Settings): string {
       </div>
       <div class="grid-2">
         <div class="field">
-          <label for="pi-path">${labels.piExecutable}</label>
-          <input id="pi-path" type="text" value="${escapeHtml(currentDraft.piPath)}" placeholder="auto" />
+          <label for="harness">${labels.harness}</label>
+          <select id="harness">
+            <option value="pi" ${codex ? '' : 'selected'}>Pi</option>
+            <option value="codex" ${codex ? 'selected' : ''}>Codex</option>
+          </select>
         </div>
+        <div class="field">
+          <label for="harness-path">${codex ? labels.codexExecutable : labels.piExecutable}</label>
+          <input id="harness-path" type="text" value="${escapeHtml(codex ? currentDraft.codexPath : currentDraft.piPath)}" placeholder="auto" />
+        </div>
+      </div>
+      <p class="hint">${labels.harnessHelp}</p>
+      ${codex ? `<div class="grid-2">${renderCodexFields(current, currentDraft.default)}</div>` : `
         <div class="field">
           <label for="def-model">${labels.defaultModel}</label>
           <input id="def-model" type="text" list="pi-models-datalist" value="${escapeHtml(currentDraft.default.model)}" placeholder="${labels.exampleModel}" />
         </div>
-      </div>
       <div class="field">
         <label>${labels.defaultThinking}</label>
         <div class="segmented" id="def-thinking-group">
@@ -452,16 +518,14 @@ function renderSettingsTab(current: AppState, currentDraft: Settings): string {
             .join('')}
         </div>
       </div>
-      <div class="grid-2">
         <div class="field">
           <label for="def-tools">${labels.defaultTools}</label>
           <input id="def-tools" type="text" value="${escapeHtml(currentDraft.default.tools)}" placeholder="read,write,edit,bash" />
-        </div>
+        </div>`}
         <div class="field">
           <label for="def-timeout">${labels.defaultTimeout}</label>
           <input id="def-timeout" type="number" min="10" max="7200" value="${currentDraft.default.timeoutSec ?? 900}" />
         </div>
-      </div>
     </div>
 
     <div class="card">
@@ -479,6 +543,7 @@ function renderSettingsTab(current: AppState, currentDraft: Settings): string {
             <button type="button" class="btn sm danger" data-delete-role="${escapeHtml(roleName)}">${labels.deleteRole}</button>
           </div>
           <div class="grid-2">
+            ${codex ? renderCodexFields(current, role, roleName) : `
             <div class="field">
               <label>${labels.roleModel}</label>
               <input type="text" list="pi-models-datalist" data-role-field="model" data-role-name="${escapeHtml(roleName)}" value="${escapeHtml(role.model || '')}" placeholder="${labels.inheritDefault}" />
@@ -497,7 +562,7 @@ function renderSettingsTab(current: AppState, currentDraft: Settings): string {
             <div class="field">
               <label>${labels.roleTools}</label>
               <input type="text" data-role-field="tools" data-role-name="${escapeHtml(roleName)}" value="${escapeHtml(role.tools || '')}" placeholder="${labels.inheritDefault}" />
-            </div>
+            </div>`}
             <div class="field">
               <label>${labels.roleTimeout}</label>
               <input type="number" min="10" max="7200" data-role-field="timeoutSec" data-role-name="${escapeHtml(roleName)}" value="${role.timeoutSec ?? ''}" placeholder="${labels.inheritDefault}" />
@@ -520,7 +585,9 @@ function render() {
     return;
   }
 
-  const piOk = state.piStatus.found;
+  const codex = state.settings.harness === 'codex';
+  const activeHarness = harnessName[state.settings.harness];
+  const status = codex ? state.codexStatus : state.piStatus;
   const models = state.modelsCache.models || [];
   const runningCount = state.recentTasks.filter((t) => t.status === 'running').length;
 
@@ -540,7 +607,7 @@ function render() {
             </select>
           </label>
           <button id="btn-refresh-models" class="btn sm" ${busy ? 'disabled' : ''}>
-            ${busy ? labels.checkingPi : labels.detectPi}
+            ${busy ? labels.checkingHarness : codex ? labels.detectCodex : labels.detectPi}
           </button>
         </div>
       </div>
@@ -562,19 +629,19 @@ function render() {
       <div class="card">
         <div class="card-header">
           <span class="card-title">${labels.environment}</span>
-          <span class="status-pill ${piOk ? 'ok' : 'warn'}">
-            ${piOk ? `pi: <span class="mono">${escapeHtml(state.piStatus.path || '')}</span>` : labels.missingPi}
+          <span class="status-pill ${status.found ? 'ok' : 'warn'}">
+            ${status.found ? `${activeHarness}: <span class="mono">${escapeHtml(status.path || '')}</span>` : labels.missingHarness(activeHarness)}
           </span>
         </div>
         ${
-          !piOk
-            ? `<div class="hint">${labels.installPi}</div>`
+          !status.found
+            ? `<div class="hint">${codex ? labels.installCodex : labels.installPi}</div>`
             : ''
         }
         ${
-          state.modelsCache.error
+          !codex && state.modelsCache.error
             ? `<div class="hint" style="color:var(--warn)">${labels.modelRefresh}: ${escapeHtml(state.modelsCache.error)}</div>`
-            : models.length > 0
+            : !codex && models.length > 0
               ? `<div class="hint">${labels.cachedModels(models.length)} · ${labels.settingsFile}: <span class="mono">${escapeHtml(state.settingsPath)}</span></div>`
               : `<div class="hint">${labels.settingsFile}: <span class="mono">${escapeHtml(state.settingsPath)}</span></div>`
         }
@@ -716,6 +783,7 @@ function bindEvents() {
         name: 'app_refresh_models',
         arguments: {},
       });
+      if (res.isError) throw new Error(res.content.map((item) => 'text' in item ? item.text : '').join(' '));
       if (res.structuredContent) {
         applyIncomingState(res.structuredContent as unknown as AppState, false);
       }
@@ -780,17 +848,33 @@ function bindEvents() {
 
   if (activeTab !== 'settings') return;
 
-  const piPathInput = document.getElementById('pi-path') as HTMLInputElement | null;
+  const harnessSelect = document.getElementById('harness') as HTMLSelectElement | null;
+  const harnessPathInput = document.getElementById('harness-path') as HTMLInputElement | null;
   const defModelInput = document.getElementById('def-model') as HTMLInputElement | null;
   const defToolsInput = document.getElementById('def-tools') as HTMLInputElement | null;
   const defTimeoutInput = document.getElementById('def-timeout') as HTMLInputElement | null;
   const newRoleInput = document.getElementById('new-role-name') as HTMLInputElement | null;
 
-  piPathInput?.addEventListener('input', () => {
+  harnessSelect?.addEventListener('change', () => {
+    if (!draft) return;
+    draft.harness = harnessSelect.value === 'codex' ? 'codex' : 'pi';
+    dirty = true;
+    render();
+  });
+  harnessPathInput?.addEventListener('input', () => {
     if (draft) {
-      draft.piPath = piPathInput.value;
+      if (draft.harness === 'codex') draft.codexPath = harnessPathInput.value;
+      else draft.piPath = harnessPathInput.value;
       markDirty();
     }
+  });
+  document.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-codex-default]').forEach((el) => {
+    el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', () => {
+      if (!draft) return;
+      const field = el.dataset.codexDefault as 'codexModel' | 'codexThinking' | 'codexSandbox';
+      draft.default[field] = el.value;
+      markDirty();
+    });
   });
   defModelInput?.addEventListener('input', () => {
     if (draft) {
@@ -869,6 +953,9 @@ function bindEvents() {
       thinking: 'inherit',
       tools: '',
       timeoutSec: null,
+      codexModel: '',
+      codexThinking: '',
+      codexSandbox: 'inherit',
     };
     newRoleName = '';
     dirty = true;
@@ -877,8 +964,8 @@ function bindEvents() {
   });
 
   document.getElementById('btn-reset-defaults')?.addEventListener('click', () => {
-    if (!state) return;
-    draft = structuredClone(state.defaults);
+    if (!state || !draft) return;
+    draft = { ...structuredClone(state.defaults), harness: draft.harness };
     dirty = true;
     setBanner(labels.defaultsRestored, 'warn');
   });

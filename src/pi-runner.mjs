@@ -6,6 +6,9 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 import { resolveEffectiveProfile } from './config.mjs';
+import {
+  buildCodexArgs, parseCodexJsonOutput, readCodexSession, resolveCodexExecutable,
+} from './codex-runner.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -52,12 +55,16 @@ export async function resolvePiExecutable(piPathSetting = 'auto') {
       : setting;
     if (path.isAbsolute(expanded)) {
       searched.push(expanded);
+      if (process.platform === 'win32') {
+        return resolveWindowsPi(expanded, []);
+      }
       if (await isExecutable(expanded)) {
         return { found: true, path: expanded, searched };
       }
       return { found: false, path: null, searched };
     }
     const pathDirs = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
+    if (process.platform === 'win32') return resolveWindowsPi(expanded, pathDirs);
     for (const dir of pathDirs) {
       const candidate = path.join(dir, expanded);
       searched.push(candidate);
@@ -69,6 +76,10 @@ export async function resolvePiExecutable(piPathSetting = 'auto') {
   }
 
   const pathDirs = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
+  if (process.platform === 'win32') {
+    if (process.env.APPDATA) pathDirs.push(path.join(process.env.APPDATA, 'npm'));
+    return resolveWindowsPi('pi', pathDirs);
+  }
   const candidates = [
     ...pathDirs.map((dir) => path.join(dir, 'pi')),
     path.join(os.homedir(), '.local', 'bin', 'pi'),
@@ -88,6 +99,32 @@ export async function resolvePiExecutable(piPathSetting = 'auto') {
   }
 
   return { found: false, path: null, searched };
+}
+
+async function resolveWindowsPi(command, dirs) {
+  const candidates = path.isAbsolute(command) ? [command] : dirs.map((dir) => path.resolve(dir, command));
+  const searched = [];
+  for (const candidate of new Set(candidates)) {
+    const ext = path.extname(candidate).toLowerCase();
+    const lookups = [];
+    if (ext === '.exe' || ['.js', '.cjs', '.mjs'].includes(ext)) lookups.push(candidate);
+    if (!ext) lookups.push(`${candidate}.exe`);
+    if (path.basename(candidate, ext).toLowerCase() === 'pi' && (!ext || ext === '.cmd' || ext === '.ps1')) {
+      lookups.push(path.join(path.dirname(candidate), 'node_modules', '@mariozechner', 'pi-coding-agent', 'dist', 'cli.js'));
+    }
+    for (const file of lookups) {
+      searched.push(file);
+      if (await isExecutable(file)) return { found: true, path: file, searched };
+    }
+  }
+  return { found: false, path: null, searched };
+}
+
+function spawnWorker(executable, args, options) {
+  if (process.platform === 'win32' && /\.(cjs|mjs|js)$/i.test(executable)) {
+    return spawn(process.execPath, [executable, ...args], options);
+  }
+  return spawn(executable, args, options);
 }
 
 async function dirHasSessionFiles(sessionDir) {
@@ -273,6 +310,9 @@ export class PiTaskManager {
     this.settingsStore = settingsStore;
     this.tasks = new Map();
     this.worktreeLeases = new Set();
+    this.codexSessionLeases = new Set();
+    this.pendingStarts = 0;
+    this.updatingSettings = false;
     this.modelsCache = {
       updatedAt: null,
       models: [],
@@ -287,12 +327,36 @@ export class PiTaskManager {
     await fs.mkdir(path.join(this.dataDir, 'worktrees'), { recursive: true });
   }
 
-  async listModels({ refresh = false } = {}) {
+  async updateSettings(input, { fromPanel = false } = {}) {
+    if (this.updatingSettings) throw new Error('A settings update is already in progress.');
+    this.updatingSettings = true;
+    try {
+      if (!fromPanel) return await this.settingsStore.patch(input);
+      const current = await this.settingsStore.load();
+      const next = { ...input, harness: input.harness ?? current.harness };
+      if (next.harness !== current.harness &&
+          (this.pendingStarts || [...this.tasks.values()].some((task) => task.status === 'running'))) {
+        throw new Error('Wait for active tasks to finish or cancel them before switching harnesses.');
+      }
+      return await this.settingsStore.save(next);
+    } finally {
+      this.updatingSettings = false;
+    }
+  }
+
+  async listModels(options = {}) {
+    return this.withSelectedHarness(() => this.loadPiModels(options));
+  }
+
+  async loadPiModels({ refresh = false } = {}) {
+    const settings = await this.settingsStore.load();
+    if (settings.harness !== 'pi') {
+      throw new Error('Model discovery is available when Pi is selected in Settings. Codex uses its CLI model configuration or a manually entered model.');
+    }
     if (!refresh && this.modelsCache.updatedAt) {
       return this.modelsCache;
     }
 
-    const settings = await this.settingsStore.load();
     const resolved = await resolvePiExecutable(settings.piPath);
     if (!resolved.found) {
       this.modelsCache = {
@@ -305,7 +369,7 @@ export class PiTaskManager {
     }
 
     const output = await new Promise((resolve) => {
-      const child = spawn(resolved.path, ['--list-models'], {
+      const child = spawnWorker(resolved.path, ['--list-models'], {
         stdio: ['ignore', 'pipe', 'pipe'],
         env: process.env,
       });
@@ -402,7 +466,21 @@ export class PiTaskManager {
     return worktree;
   }
 
-  async submit({
+  async withSelectedHarness(run) {
+    if (this.updatingSettings) throw new Error('Wait for the settings update before submitting a task.');
+    this.pendingStarts += 1;
+    try {
+      return await run();
+    } finally {
+      this.pendingStarts -= 1;
+    }
+  }
+
+  async submit(options) {
+    return this.withSelectedHarness(() => this.prepareTask(options));
+  }
+
+  async prepareTask({
     prompt,
     cwd,
     role,
@@ -414,6 +492,7 @@ export class PiTaskManager {
     sessionKey,
     worktree = false,
     finishOnSettled = false,
+    expectedHarness,
   }) {
     if (!prompt || !String(prompt).trim()) {
       throw new Error('prompt is required');
@@ -429,13 +508,9 @@ export class PiTaskManager {
 
     await this.ensureDirs();
     const settings = await this.settingsStore.load();
-    const resolved = await resolvePiExecutable(settings.piPath);
-    if (!resolved.found) {
-      throw new Error(
-        `Pi executable not found (piPath="${settings.piPath}"). Install @mariozechner/pi-coding-agent (e.g. npm i -g @mariozechner/pi-coding-agent) or configure piPath in Pi Swarm Settings.`,
-      );
+    if (expectedHarness && settings.harness !== expectedHarness) {
+      throw new Error(`This swarm uses ${expectedHarness}. Select ${expectedHarness} in Settings to continue it, or create a new swarm for ${settings.harness}.`);
     }
-
     const profile = resolveEffectiveProfile(settings, {
       role,
       model,
@@ -443,8 +518,37 @@ export class PiTaskManager {
       tools,
       timeoutSec,
     });
+    const codex = profile.harness === 'codex';
+    const resolved = codex
+      ? await resolveCodexExecutable(settings.codexPath)
+      : await resolvePiExecutable(settings.piPath);
+    if (!resolved.found) {
+      throw new Error(codex
+        ? `Codex executable not found (codexPath="${settings.codexPath}"). Install the Codex CLI or configure its executable in Settings.`
+        : `Pi executable not found (piPath="${settings.piPath}"). Install @mariozechner/pi-coding-agent (e.g. npm i -g @mariozechner/pi-coding-agent) or configure piPath in Pi Swarm Settings.`);
+    }
+    const key = sessionKey && String(sessionKey).trim();
+    const lease = codex && key;
+    if (lease && this.codexSessionLeases.has(lease)) {
+      throw new Error('A task is already running for this Codex session key.');
+    }
+    if (lease) this.codexSessionLeases.add(lease);
+    try {
+      return await this.startTask({
+        prompt, cwd, role, label, sessionKey: key, worktree, finishOnSettled,
+        profile, executable: resolved.path, codex, lease,
+      });
+    } catch (err) {
+      if (lease) this.codexSessionLeases.delete(lease);
+      throw err;
+    }
+  }
 
-    const taskId = `pi_${Date.now().toString(36)}_${randomUUID().slice(0, 6)}`;
+  async startTask({
+    prompt, cwd, role, label, sessionKey, worktree, finishOnSettled,
+    profile, executable, codex, lease,
+  }) {
+    const taskId = `${profile.harness}_${Date.now().toString(36)}_${randomUUID().slice(0, 6)}`;
     const logPath = path.join(this.dataDir, 'logs', `${taskId}.log`);
 
     let worktreeInfo = null;
@@ -456,7 +560,7 @@ export class PiTaskManager {
 
     let sessionDir = null;
     let continueSession = false;
-    if (sessionKey && String(sessionKey).trim()) {
+    if (!codex && sessionKey) {
       const safeKey = String(sessionKey)
         .trim()
         .replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -465,7 +569,9 @@ export class PiTaskManager {
       continueSession = await dirHasSessionFiles(sessionDir);
     }
 
-    const args = buildPiArgs({
+    const codexSession = codex ? await readCodexSession(this.dataDir, runCwd, sessionKey) : null;
+    const outputPath = codex ? `${logPath}.reply` : null;
+    const args = codex ? buildCodexArgs({ ...profile, ...codexSession, outputPath }) : buildPiArgs({
       prompt: String(prompt),
       model: profile.model,
       thinking: profile.thinking,
@@ -478,9 +584,9 @@ export class PiTaskManager {
 
     const logStream = await fs.open(logPath, 'w');
 
-    const child = spawn(resolved.path, args, {
+    const child = spawnWorker(executable, args, {
       cwd: runCwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [codex ? 'pipe' : 'ignore', 'pipe', 'pipe'],
       env: process.env,
     });
 
@@ -497,7 +603,6 @@ export class PiTaskManager {
       cwd: runCwd,
       originalCwd: cwd,
       worktree: worktreeInfo,
-      piPath: resolved.path,
       profile,
       sessionKey: sessionKey || null,
       createdAt: Date.now(),
@@ -531,7 +636,7 @@ export class PiTaskManager {
     child.stdout.on('data', (text) => {
       task.stdout += text;
       logStream.write(text).catch(() => {});
-      if (!finishOnSettled || settled) return;
+      if (codex || !finishOnSettled || settled) return;
       const lines = (pendingLine + text).split('\n');
       pendingLine = lines.pop() || '';
       for (const line of lines) {
@@ -567,25 +672,60 @@ export class PiTaskManager {
       clearTimeout(task.timer);
       clearTimeout(settleTimer);
       clearTimeout(forceTimer);
-      task.endedAt = Date.now();
       task.exitCode = code;
+      let status;
       if (task.cancelled) {
-        task.status = 'cancelled';
+        status = 'cancelled';
       } else if (task.timedOut) {
-        task.status = 'failed';
+        status = 'failed';
         task.stderr = `${task.stderr}\nTimed out after ${profile.timeoutSec}s`.trim();
       } else if (spawnError) {
-        task.status = 'failed';
+        status = 'failed';
         task.stderr = `${task.stderr}\n${spawnError.message}`.trim();
       } else if (code === 0 || (settled && code === null)) {
-        task.status = 'completed';
+        status = 'completed';
       } else {
-        task.status = 'failed';
+        status = 'failed';
+      }
+      if (codex) {
+        try {
+          if (status === 'completed') {
+            const parsed = parseCodexJsonOutput(task.stdout);
+            if (parsed.errorText || !parsed.completed) {
+              throw new Error(parsed.errorText || 'Codex exited without completing the turn');
+            }
+            const finalText = (await fs.readFile(outputPath, 'utf8').catch((err) => {
+              if (err.code === 'ENOENT') return '';
+              throw err;
+            })).trim();
+            if (!finalText) throw new Error('Codex completed the turn without a final reply');
+            const { sessionPath, threadId } = codexSession;
+            if (sessionPath && !threadId) {
+              if (!parsed.threadId) throw new Error('Codex did not report a session ID');
+              const temporaryPath = `${sessionPath}.${taskId}.tmp`;
+              try {
+                await fs.writeFile(temporaryPath, parsed.threadId, { mode: 0o600 });
+                await fs.rename(temporaryPath, sessionPath);
+              } finally {
+                await fs.rm(temporaryPath, { force: true }).catch(() => {});
+              }
+            }
+            task.finalText = finalText;
+          }
+        } catch (error) {
+          status = 'failed';
+          task.runError = error.message;
+        } finally {
+          await fs.rm(outputPath, { force: true }).catch(() => {});
+        }
       }
       if (task.worktree) {
         await this.inspectWorktree(task.worktree);
       }
       await logStream.close().catch(() => {});
+      if (lease) this.codexSessionLeases.delete(lease);
+      task.endedAt = Date.now();
+      task.status = status;
       resolveDone(task);
     };
 
@@ -595,6 +735,10 @@ export class PiTaskManager {
     child.on('close', (code) => {
       finalize(code ?? (settled ? null : -1));
     });
+    if (codex) {
+      child.stdin.on('error', () => {}); // Early CLI failures are reported on stderr/close.
+      child.stdin.end(String(prompt), 'utf8');
+    }
 
     this.tasks.set(taskId, task);
 
@@ -602,7 +746,9 @@ export class PiTaskManager {
       task_id: taskId,
       label: task.label,
       status: task.status,
-      pi_path: resolved.path,
+      harness: profile.harness,
+      executable_path: executable,
+      ...(codex ? {} : { pi_path: executable }),
       cwd: runCwd,
       worktree: worktreeInfo,
       profile,
@@ -613,7 +759,8 @@ export class PiTaskManager {
   }
 
   formatTaskSnapshot(task) {
-    const parsed = parsePiJsonOutput(task.stdout);
+    const codex = task.profile.harness === 'codex';
+    const parsed = codex ? parseCodexJsonOutput(task.stdout) : parsePiJsonOutput(task.stdout);
     const elapsedMs = (task.endedAt || Date.now()) - task.createdAt;
     const stderrTail = task.stderr.trim().slice(-2000);
 
@@ -622,6 +769,7 @@ export class PiTaskManager {
       label: task.label,
       prompt_preview: task.promptPreview,
       status: task.status,
+      harness: task.profile.harness,
       cwd: task.cwd,
       worktree: task.worktree,
       profile: task.profile,
@@ -631,8 +779,8 @@ export class PiTaskManager {
       exit_code: task.exitCode,
       json_events: parsed.jsonEvents,
       tool_calls: parsed.toolCalls,
-      result_text: parsed.finalText,
-      error_text: parsed.errorText || (task.status === 'failed' ? stderrTail : ''),
+      result_text: (codex ? task.finalText : parsed.finalText) || '',
+      error_text: task.runError || parsed.errorText || (task.status === 'failed' ? stderrTail : ''),
       stderr_tail: stderrTail,
       log_path: task.logPath,
       created_at: new Date(task.createdAt).toISOString(),
