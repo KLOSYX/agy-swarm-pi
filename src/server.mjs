@@ -93,7 +93,7 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
   const boards = new SwarmBoards(taskManager);
   const server = new McpServer({
     name: 'swarm-pi',
-    version: '0.3.0',
+    version: '0.3.1',
   });
 
   async function buildAppState(extra = {}) {

@@ -29,11 +29,11 @@ npm install -g @mariozechner/pi-coding-agent
 
 ### 方式一：从 GitHub Release 下载零依赖安装包
 
-从 [GitHub Releases](https://github.com/KLOSYX/agy-swarm-pi/releases) 下载对应版本的安装包。以下以 v0.3.0 为例。
+从 [GitHub Releases](https://github.com/KLOSYX/agy-swarm-pi/releases) 下载对应版本的安装包。以下以 v0.3.1 为例。
 
 ```bash
-curl -fsSLO https://github.com/KLOSYX/agy-swarm-pi/releases/download/v0.3.0/swarm-pi-v0.3.0.tar.gz
-tar -xzf swarm-pi-v0.3.0.tar.gz
+curl -fsSLO https://github.com/KLOSYX/agy-swarm-pi/releases/download/v0.3.1/swarm-pi-v0.3.1.tar.gz
+tar -xzf swarm-pi-v0.3.1.tar.gz
 ./swarm-pi/install.sh
 ```
 

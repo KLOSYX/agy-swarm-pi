@@ -91,6 +91,8 @@ else
     plugin.json \
     mcp_config.json \
     README.md \
+    README.zh-CN.md \
+    LICENSE \
     install.sh \
     assets \
     bin \

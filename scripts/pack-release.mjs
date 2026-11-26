@@ -11,6 +11,8 @@ const INCLUDE_PATHS = [
   'plugin.json',
   'mcp_config.json',
   'README.md',
+  'README.zh-CN.md',
+  'LICENSE',
   'install.sh',
   'assets/logo.svg',
   'bin/start-server.sh',

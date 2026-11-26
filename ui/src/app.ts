@@ -104,7 +104,7 @@ interface AppState {
 }
 
 const root = document.getElementById('app') as HTMLElement;
-const app = new App({ name: 'Pi Swarm', version: '0.3.0' }, {});
+const app = new App({ name: 'Pi Swarm', version: '0.3.1' }, {});
 
 let state: AppState | null = null;
 let language: Language = 'en';

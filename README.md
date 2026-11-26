@@ -1,6 +1,6 @@
 # agy-swarm-pi (`swarm-pi`)
 
-English · [简体中文](https://github.com/KLOSYX/agy-swarm-pi/blob/main/README.zh-CN.md)
+English · [简体中文](README.zh-CN.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -26,11 +26,11 @@ npm install -g @mariozechner/pi-coding-agent
 
 ### From a GitHub release
 
-Download the version you want from [GitHub Releases](https://github.com/KLOSYX/agy-swarm-pi/releases). This example installs v0.3.0.
+Download the version you want from [GitHub Releases](https://github.com/KLOSYX/agy-swarm-pi/releases). This example installs v0.3.1.
 
 ```bash
-curl -fsSLO https://github.com/KLOSYX/agy-swarm-pi/releases/download/v0.3.0/swarm-pi-v0.3.0.tar.gz
-tar -xzf swarm-pi-v0.3.0.tar.gz
+curl -fsSLO https://github.com/KLOSYX/agy-swarm-pi/releases/download/v0.3.1/swarm-pi-v0.3.1.tar.gz
+tar -xzf swarm-pi-v0.3.1.tar.gz
 ./swarm-pi/install.sh
 ```
 
