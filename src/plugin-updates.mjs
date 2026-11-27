@@ -152,13 +152,16 @@ export class PluginUpdates {
     this.root = path.resolve(root);
     this.dataDir = path.resolve(dataDir);
     this.currentVersion = version;
-    this.directory = path.join(path.dirname(this.root), `.swarm-pi-updates-${path.basename(this.root)}`);
+    this.physicalRoot = fsSync.realpathSync(this.root);
+    this.directory = path.join(path.dirname(this.physicalRoot), `.swarm-pi-updates-${path.basename(this.physicalRoot)}`);
     this.workDir = path.join(this.directory, 'work');
     this.activationLock = path.join(this.directory, 'install.lock');
     this.fetchRelease = fetchRelease;
     this.hasActiveWork = hasActiveWork;
     this.openBoards = openBoards;
     this.installing = false;
+    this.workCount = 0;
+    this.workMarker = null;
   }
 
   installationLayoutBlock() {
@@ -183,36 +186,47 @@ export class PluginUpdates {
   }
 
   claimWork() {
+    if (this.workCount > 0) return this.retainWork();
+    // A checkout cannot be replaced by the updater even when opened through
+    // another path. All other aliases share the real installation's leases.
+    if (fsSync.existsSync(path.join(this.physicalRoot, '.git'))) return undefined;
     if (processMarkers(this.activationLock).some(markerIsLive)) {
       throw new Error('Wait for the Pi Swarm update to finish before starting a task');
     }
-    let lease;
     try {
-      if (this.installationLayoutBlock()) return undefined;
       this.createUpdateDirectory();
       fsSync.mkdirSync(this.workDir, { recursive: true, mode: 0o700 });
       if (fsSync.lstatSync(this.workDir).isSymbolicLink()) return undefined;
-      lease = path.join(this.workDir, `${process.pid}-${randomUUID()}`);
-      fsSync.writeFileSync(lease, '', { mode: 0o600, flag: 'wx' });
+      this.workMarker = path.join(this.workDir, `${process.pid}-${randomUUID()}`);
+      fsSync.writeFileSync(this.workMarker, '', { mode: 0o600, flag: 'wx' });
     } catch (err) {
-      // Read-only or legacy installations can keep running tasks.
+      // Read-only installations can keep running tasks.
       if (['EACCES', 'EPERM', 'EROFS'].includes(err.code)) return undefined;
       throw err;
     }
-    const release = () => {
-      try {
-        fsSync.rmSync(lease, { force: true });
-      } catch (err) {
-        console.error('Pi Swarm could not release its update work lease:', err.message);
-      }
-    };
-    // Write the work lease before checking the lock. The installer does
-    // the opposite so a worker cannot start during the directory switch.
+    const release = this.retainWork();
+    // Publish before checking the lock. Installation takes the lock before
+    // checking work, so the two operations cannot cross the directory switch.
     if (processMarkers(this.activationLock).some(markerIsLive)) {
       release();
       throw new Error('Wait for the Pi Swarm update to finish before starting a task');
     }
     return release;
+  }
+
+  retainWork() {
+    this.workCount += 1;
+    return () => {
+      this.workCount -= 1;
+      if (this.workCount > 0) return;
+      try {
+        fsSync.rmSync(this.workMarker, { force: true });
+      } catch (err) {
+        console.error('Pi Swarm could not release its update work lease:', err.message);
+      } finally {
+        this.workMarker = null;
+      }
+    };
   }
 
   lockActivation() {

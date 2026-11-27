@@ -179,8 +179,10 @@ test('the public release page provides update checks when the GitHub API is rate
   assert.equal(available.installBlock, null);
 });
 
-test('a second MCP process reports task leases to the same installation', async (t) => {
-  const { root, dataDir, fetchRelease } = await fixture(t);
+test('a second MCP process reports task leases through an alias of the same installation', async (t) => {
+  const { root, dir, dataDir, fetchRelease } = await fixture(t);
+  const alias = path.join(dir, 'linked-plugin');
+  await fs.symlink(root, alias, 'junction');
   const fakeWorker = spawn(process.execPath, [
     '--input-type=module', '-e',
     `import { PluginUpdates } from './src/plugin-updates.mjs';
@@ -189,7 +191,7 @@ test('a second MCP process reports task leases to the same installation', async 
     updates.claimWork();
     console.log('leased');
     setInterval(() => {}, 1000);`,
-    root, dataDir,
+    alias, path.join(root, 'other-data'),
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
   const closed = once(fakeWorker, 'close');
   t.after(async () => {
@@ -239,4 +241,37 @@ test('the bundled MCP launcher preserves a symbolic plugin root', async (t) => {
     await client.close();
   }
   assert.equal(await fs.readFile(path.join(root, 'old-file'), 'utf8'), 'previous bundle');
+});
+
+test('a member keeps the update lease across sequential assignments and handoffs', async (t) => {
+  const { root, dataDir, fetchRelease } = await fixture(t);
+  const { boards, taskManager } = createSwarmPiServer({ dataDir, pluginRoot: root, updateFetch: fetchRelease });
+  const verifier = new PluginUpdates({
+    root, dataDir, version: installedVersion, fetchRelease, hasActiveWork: () => false, openBoards: () => 0,
+  });
+  const submissions = [];
+  taskManager.submit = async ({ cwd, label }) => {
+    assert.equal((await verifier.check()).installBlock, 'activeWork');
+    return { task_id: String(submissions.push(label)), cwd };
+  };
+  let resolveFirst;
+  const firstDone = new Promise((resolve) => { resolveFirst = resolve; });
+  taskManager.waitForCompletion = async (id) => {
+    if (id === '1') await firstDone;
+    return { status: 'completed', result_text: id === '2' ? 'SWARM_POST @other Review it' : 'Done.' };
+  };
+  const { id } = await boards.create({
+    title: 'Queued work', cwd: dataDir, members: [{ name: 'member' }, { name: 'other' }],
+  });
+  await boards.post(id, 'coordinator', 'member', 'First task');
+  await boards.post(id, 'coordinator', 'member', 'Second task');
+  await assert.rejects(verifier.install(version), { code: 'activeWork' });
+  resolveFirst();
+  const expires = Date.now() + 3000;
+  while (boards.hasActiveWork() && Date.now() < expires) {
+    await new Promise((resolve) => setTimeout(resolve, 15));
+  }
+  assert.equal(boards.hasActiveWork(), false);
+  assert.deepEqual(submissions, ['member', 'member', 'other']);
+  assert.equal((await verifier.check()).installBlock, null);
 });

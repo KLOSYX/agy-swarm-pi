@@ -163,90 +163,96 @@ export class SwarmBoards {
 
   deliver(board, { from, to, text, budget, ...details }) {
     const recipient = board.roster.get(to);
+    const needsTurn = recipient && recipient.status !== 'working';
+    const release = needsTurn ? this.taskManager.claimWork?.() : undefined;
     const entry = this.append(board, { from, to, text, kind: 'message', ...details });
     if (recipient) {
       recipient.queue.push({ entry, budget });
-      if (recipient.status !== 'working') void this.runMember(board, recipient);
+      if (needsTurn) void this.runMember(board, recipient, release);
     }
     return entry;
   }
 
-  async runMember(board, member) {
+  async runMember(board, member, release) {
     member.status = 'working';
-    while (member.queue.length > 0) {
-      const { entry, budget } = member.queue.shift();
-      member.turns += 1;
-      let task;
-      try {
-        const sender = board.roster.get(entry.from);
-        const roster = [...board.roster.keys()].filter((name) => name !== member.name);
-        const prompt = [
-          `Pi Swarm "${board.title}". You are @${member.name}. ${member.brief || ''}`,
-          `Recipients: @coordinator${roster.map((name) => `, @${name}`).join('')}.`,
-          'To hand work, questions, or review findings to another member, put a line in your final answer in the exact form SWARM_POST @recipient message.',
-          'Use one plain line per message and only address a member who needs to act. The board sends your remaining final answer as a status update. Report verification passes to @coordinator.',
-          `Board message #${entry.number} from @${entry.from}${sender ? ` (workspace: ${sender.cwd})` : ''}:`,
-          entry.text,
-        ].join('\n');
-        task = await this.taskManager.submit({
-          prompt, cwd: member.cwd, label: member.name, role: member.role,
-          model: member.model, thinking: member.thinking, tools: member.tools,
-          timeoutSec: member.timeoutSec, worktree: member.worktree && !member.worktreeTaskId,
-          sessionKey: `board-${board.id}-${member.name}`, finishOnSettled: true,
-          expectedHarness: board.harness,
-        });
-        member.taskId = task.task_id;
-        if (task.worktree) {
-          member.worktreeTaskId = task.task_id;
-          this.taskManager.worktreeLeases.add(task.task_id);
-        }
-        member.cwd = task.cwd;
-        const result = await this.taskManager.waitForCompletion(task.task_id);
-        member.actualModel = result.actual_model;
-        if (result.status !== 'completed' || result.error_text || !result.result_text.trim()) {
-          throw new Error(result.error_text || `${board.harness} ended with ${result.status} and no usable reply`);
-        }
-        const feedback = [];
-        const handoffs = [];
-        const summary = [];
-        for (const line of result.result_text.split(/\r?\n/)) {
-          const route = line.trim().match(ROUTE);
-          if (!route) {
-            if (line.trim().startsWith('SWARM_POST')) feedback.push('Invalid SWARM_POST syntax');
-            else summary.push(line);
-            continue;
+    try {
+      while (member.queue.length > 0) {
+        const { entry, budget } = member.queue.shift();
+        member.turns += 1;
+        let task;
+        try {
+          const sender = board.roster.get(entry.from);
+          const roster = [...board.roster.keys()].filter((name) => name !== member.name);
+          const prompt = [
+            `Pi Swarm "${board.title}". You are @${member.name}. ${member.brief || ''}`,
+            `Recipients: @coordinator${roster.map((name) => `, @${name}`).join('')}.`,
+            'To hand work, questions, or review findings to another member, put a line in your final answer in the exact form SWARM_POST @recipient message.',
+            'Use one plain line per message and only address a member who needs to act. The board sends your remaining final answer as a status update. Report verification passes to @coordinator.',
+            `Board message #${entry.number} from @${entry.from}${sender ? ` (workspace: ${sender.cwd})` : ''}:`,
+            entry.text,
+          ].join('\n');
+          task = await this.taskManager.submit({
+            prompt, cwd: member.cwd, label: member.name, role: member.role,
+            model: member.model, thinking: member.thinking, tools: member.tools,
+            timeoutSec: member.timeoutSec, worktree: member.worktree && !member.worktreeTaskId,
+            sessionKey: `board-${board.id}-${member.name}`, finishOnSettled: true,
+            expectedHarness: board.harness,
+          });
+          member.taskId = task.task_id;
+          if (task.worktree) {
+            member.worktreeTaskId = task.task_id;
+            this.taskManager.worktreeLeases.add(task.task_id);
           }
-          const [, to, text] = route;
-          if (to === member.name || (to !== 'coordinator' && !board.roster.has(to))) {
-            feedback.push(`Invalid handoff to @${to}`);
-          } else if (text.length > 4000) {
-            feedback.push(`Handoff to @${to} exceeds 4000 characters`);
-          } else if (to !== 'coordinator' && budget.remaining === 0) {
-            feedback.push(`Automatic handoff limit reached for @${to}`);
-          } else {
-            if (to !== 'coordinator') budget.remaining -= 1;
-            handoffs.push({ from: member.name, to, text, budget });
+          member.cwd = task.cwd;
+          const result = await this.taskManager.waitForCompletion(task.task_id);
+          member.actualModel = result.actual_model;
+          if (result.status !== 'completed' || result.error_text || !result.result_text.trim()) {
+            throw new Error(result.error_text || `${board.harness} ended with ${result.status} and no usable reply`);
           }
+          const feedback = [];
+          const handoffs = [];
+          const summary = [];
+          for (const line of result.result_text.split(/\r?\n/)) {
+            const route = line.trim().match(ROUTE);
+            if (!route) {
+              if (line.trim().startsWith('SWARM_POST')) feedback.push('Invalid SWARM_POST syntax');
+              else summary.push(line);
+              continue;
+            }
+            const [, to, text] = route;
+            if (to === member.name || (to !== 'coordinator' && !board.roster.has(to))) {
+              feedback.push(`Invalid handoff to @${to}`);
+            } else if (text.length > 4000) {
+              feedback.push(`Handoff to @${to} exceeds 4000 characters`);
+            } else if (to !== 'coordinator' && budget.remaining === 0) {
+              feedback.push(`Automatic handoff limit reached for @${to}`);
+            } else {
+              if (to !== 'coordinator') budget.remaining -= 1;
+              handoffs.push({ from: member.name, to, text, budget });
+            }
+          }
+          const details = { taskId: task.task_id, replyTo: entry.number };
+          this.append(board, {
+            from: member.name, kind: 'result', text: summary.join('\n').trim().slice(0, 4000),
+            actualModel: result.actual_model, ...details,
+          });
+          for (const text of feedback) this.append(board, { from: member.name, kind: 'error', text, ...details });
+          for (const handoff of handoffs) this.deliver(board, { ...handoff, ...details });
+          member.lastTurnFailed = feedback.length > 0;
+        } catch (error) {
+          member.lastTurnFailed = true;
+          this.append(board, {
+            from: member.name, kind: 'error', text: error.message,
+            replyTo: entry.number, taskId: task?.task_id, logPath: task?.log_path,
+          });
         }
-        const details = { taskId: task.task_id, replyTo: entry.number };
-        this.append(board, {
-          from: member.name, kind: 'result', text: summary.join('\n').trim().slice(0, 4000),
-          actualModel: result.actual_model, ...details,
-        });
-        for (const text of feedback) this.append(board, { from: member.name, kind: 'error', text, ...details });
-        for (const handoff of handoffs) this.deliver(board, { ...handoff, ...details });
-        member.lastTurnFailed = feedback.length > 0;
-      } catch (error) {
-        member.lastTurnFailed = true;
-        this.append(board, {
-          from: member.name, kind: 'error', text: error.message,
-          replyTo: entry.number, taskId: task?.task_id, logPath: task?.log_path,
-        });
       }
+      member.status = member.lastTurnFailed ? 'blocked' : 'waiting';
+      for (const wake of board.waiters) wake();
+      if (this.settled(board)) this.notifyCoordinator(board, board.messages.length);
+    } finally {
+      release?.();
     }
-    member.status = member.lastTurnFailed ? 'blocked' : 'waiting';
-    for (const wake of board.waiters) wake();
-    if (this.settled(board)) this.notifyCoordinator(board, board.messages.length);
   }
 
   snapshot(board, after = 0) {
