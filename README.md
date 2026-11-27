@@ -33,11 +33,11 @@ codex login
 
 ### From a GitHub release
 
-Download the version you want from [GitHub Releases](https://github.com/KLOSYX/agy-swarm-pi/releases). This example installs v0.4.2.
+Download the version you want from [GitHub Releases](https://github.com/KLOSYX/agy-swarm-pi/releases). This example installs v0.4.3.
 
 ```bash
-curl -fsSLO https://github.com/KLOSYX/agy-swarm-pi/releases/download/v0.4.2/swarm-pi-v0.4.2.tar.gz
-tar -xzf swarm-pi-v0.4.2.tar.gz
+curl -fsSLO https://github.com/KLOSYX/agy-swarm-pi/releases/download/v0.4.3/swarm-pi-v0.4.3.tar.gz
+tar -xzf swarm-pi-v0.4.3.tar.gz
 ./swarm-pi/install.sh
 ```
 
