@@ -19,6 +19,7 @@ test('native Swarm defines an MCP-enabled monitor for an existing assignment', a
   assert.match(worker, /call_mcp_tool/);
   assert.match(worker, /pi_swarm_read/);
   assert.match(worker, /replyTo/);
+  assert.match(worker, /response's `lastMessage`/);
   assert.doesNotMatch(worker, /pi_submit_task/);
 });
 test('the release archives and installer retain the native worker prompt and bundled panel', async (t) => {
