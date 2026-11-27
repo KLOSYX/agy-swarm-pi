@@ -96,6 +96,7 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath, pluginRoot = PLUGIN_R
   const taskManager = new PiTaskManager({
     dataDir: resolvedDataDir,
     settingsStore,
+    claimWork: () => updates.claimWork(),
   });
 
   const boards = new SwarmBoards(taskManager, settingsStore);
@@ -689,7 +690,8 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath, pluginRoot = PLUGIN_R
 
 async function main() {
   const { dataDir } = parseCliArgs(process.argv.slice(2));
-  const { server } = createSwarmPiServer({ dataDir });
+  const pluginRoot = process.env.PLUGIN_ROOT || path.resolve(path.dirname(process.argv[1]), '..');
+  const { server } = createSwarmPiServer({ dataDir, pluginRoot });
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }

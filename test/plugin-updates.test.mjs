@@ -1,20 +1,25 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import test from 'node:test';
 import tar from 'tar-stream';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { createSwarmPiServer } from '../src/server.mjs';
 import { PluginUpdates } from '../src/plugin-updates.mjs';
 import pluginManifest from '../plugin.json' with { type: 'json' };
 
 const installedVersion = pluginManifest.version;
-const version = '0.10.0';
+const [currentMajor, currentMinor] = installedVersion.split('.').map(Number);
+const version = `${currentMajor}.${currentMinor + 10}.0`;
 const asset = `swarm-pi-v${version}.tar.gz`;
 
 async function archiveFixture(extra = []) {
@@ -172,4 +177,66 @@ test('the public release page provides update checks when the GitHub API is rate
   assert.equal(available.latestVersion, version);
   assert.equal(available.available, true);
   assert.equal(available.installBlock, null);
+});
+
+test('a second MCP process reports task leases to the same installation', async (t) => {
+  const { root, dataDir, fetchRelease } = await fixture(t);
+  const fakeWorker = spawn(process.execPath, [
+    '--input-type=module', '-e',
+    `import { PluginUpdates } from './src/plugin-updates.mjs';
+    const [root, dataDir] = process.argv.slice(1);
+    const updates = new PluginUpdates({ root, dataDir, version: ${JSON.stringify(installedVersion)} });
+    updates.claimWork();
+    console.log('leased');
+    setInterval(() => {}, 1000);`,
+    root, dataDir,
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const closed = once(fakeWorker, 'close');
+  t.after(async () => {
+    fakeWorker.kill();
+    await closed;
+  });
+  const started = await Promise.race([
+    once(fakeWorker.stdout, 'data').then(([data]) => String(data)),
+    closed.then(() => 'child closed'),
+  ]);
+  assert.match(started, /leased/);
+  const updates = new PluginUpdates({ root, dataDir, version: installedVersion, fetchRelease, hasActiveWork: () => false, openBoards: () => 0 });
+  assert.equal((await updates.check()).installBlock, 'activeWork');
+  await assert.rejects(updates.install(version), { code: 'activeWork' });
+  fakeWorker.kill();
+  await closed;
+  assert.equal((await updates.check()).installBlock, null);
+});
+
+test('the bundled MCP launcher preserves a symbolic plugin root', async (t) => {
+  const { root, dir, dataDir } = await fixture(t);
+  const alias = path.join(dir, 'linked-plugin');
+  await fs.symlink(root, alias, 'junction');
+  await fs.mkdir(path.join(root, 'bin'));
+  await fs.copyFile(new URL('../bin/server.bundle.mjs', import.meta.url), path.join(root, 'bin', 'server.bundle.mjs'));
+  const fetchStub = path.join(dir, 'fetch.mjs');
+  await fs.writeFile(fetchStub,
+    `globalThis.fetch = async () => Response.json({ tag_name: 'v${version}', assets: [
+      {name: '${asset}', state: 'uploaded'}, {name: '${asset}.sha256', state: 'uploaded'}
+    ] });`);
+  const client = new Client({ name: 'linked-installation-test', version: '1' });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: ['--import', pathToFileURL(fetchStub).href, path.join(alias, 'bin', 'server.bundle.mjs'), '--data-dir', dataDir],
+    env: { PLUGIN_ROOT: '' },
+  });
+  try {
+    await client.connect(transport);
+    const check = (await client.callTool({ name: 'app_check_update', arguments: {} })).structuredContent;
+    assert.equal(check.available, true);
+    assert.equal(check.installBlock, 'linkedInstallation');
+    const install = (await client.callTool({
+      name: 'app_install_update', arguments: { expectedVersion: version, confirmed: true },
+    })).structuredContent;
+    assert.equal(install.code, 'linkedInstallation');
+  } finally {
+    await client.close();
+  }
+  assert.equal(await fs.readFile(path.join(root, 'old-file'), 'utf8'), 'previous bundle');
 });

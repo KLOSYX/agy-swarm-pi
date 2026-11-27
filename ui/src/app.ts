@@ -930,7 +930,7 @@ async function runUpdate(action: 'checking' | 'installing') {
     const result = await app.callServerTool(action === 'checking'
       ? { name: 'app_check_update', arguments: {} }
       : { name: 'app_install_update', arguments: { expectedVersion: updateCheck!.latestVersion, confirmed: true } },
-      { timeout: action === 'checking' ? 15000 : 45000 });
+      { timeout: action === 'checking' ? 20000 : 50000 });
     if (result.isError || !result.structuredContent) throw new Error('Update tool did not return a result');
     const payload = result.structuredContent as unknown as UpdateCheck | UpdateFailure | InstalledUpdate;
     if ('status' in payload && payload.status === 'error') {

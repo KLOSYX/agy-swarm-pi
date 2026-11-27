@@ -305,9 +305,10 @@ export function parseListModelsOutput(stdoutText) {
 }
 
 export class PiTaskManager {
-  constructor({ dataDir, settingsStore }) {
+  constructor({ dataDir, settingsStore, claimWork }) {
     this.dataDir = dataDir;
     this.settingsStore = settingsStore;
+    this.claimWork = claimWork;
     this.tasks = new Map();
     this.worktreeLeases = new Set();
     this.codexSessionLeases = new Set();
@@ -480,7 +481,15 @@ export class PiTaskManager {
   }
 
   async submit(options) {
-    return this.withSelectedHarness(() => this.prepareTask(options));
+    const release = this.claimWork?.();
+    try {
+      const result = await this.withSelectedHarness(() => this.prepareTask(options));
+      if (release) void this.tasks.get(result.task_id).donePromise.then(release, release);
+      return result;
+    } catch (err) {
+      release?.();
+      throw err;
+    }
   }
 
   async prepareTask({

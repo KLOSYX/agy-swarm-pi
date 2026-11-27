@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -7,6 +7,7 @@ import { pipeline } from 'node:stream/promises';
 import { promisify } from 'node:util';
 import { gunzip } from 'node:zlib';
 import tar from 'tar-stream';
+import { processIsAlive } from '../bin/coordinator-files.mjs';
 
 const REPOSITORY = 'KLOSYX/agy-swarm-pi';
 const RELEASES = `https://github.com/${REPOSITORY}/releases`;
@@ -58,6 +59,27 @@ function readManifest(root) {
 function contains(root, target) {
   const relative = path.relative(root, target);
   return !relative || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
+}
+
+function processMarkers(directory) {
+  try {
+    return fsSync.readdirSync(directory).filter((name) => /^\d+-[0-9a-f-]{36}$/.test(name));
+  } catch (err) {
+    if (err.code === 'ENOENT') return [];
+    throw err;
+  }
+}
+
+function markerIsLive(name) {
+  return processIsAlive(Number(name.split('-')[0]));
+}
+
+function removeEmptyDirectory(directory) {
+  try {
+    fsSync.rmdirSync(directory);
+  } catch (err) {
+    if (!['ENOENT', 'EEXIST', 'ENOTEMPTY'].includes(err.code)) throw err;
+  }
 }
 
 class UpdateError extends Error {
@@ -130,13 +152,16 @@ export class PluginUpdates {
     this.root = path.resolve(root);
     this.dataDir = path.resolve(dataDir);
     this.currentVersion = version;
+    this.directory = path.join(path.dirname(this.root), `.swarm-pi-updates-${path.basename(this.root)}`);
+    this.workDir = path.join(this.directory, 'work');
+    this.activationLock = path.join(this.directory, 'install.lock');
     this.fetchRelease = fetchRelease;
     this.hasActiveWork = hasActiveWork;
     this.openBoards = openBoards;
     this.installing = false;
   }
 
-  installationBlock() {
+  installationLayoutBlock() {
     if (fsSync.existsSync(path.join(this.root, '.git'))) return 'gitCheckout';
     if (fsSync.lstatSync(this.root).isSymbolicLink()) return 'linkedInstallation';
     if (contains(this.root, this.dataDir) || fsSync.existsSync(path.join(this.root, '.data'))
@@ -144,7 +169,76 @@ export class PluginUpdates {
       return 'dataInPlugin';
     }
     if (readManifest(this.root).name !== 'swarm-pi') return 'invalidInstallation';
-    return this.hasActiveWork() ? 'activeWork' : null;
+    return null;
+  }
+
+  installationBlock() {
+    return this.installationLayoutBlock()
+      ?? (this.hasActiveWork() || processMarkers(this.workDir).some(markerIsLive) ? 'activeWork' : null);
+  }
+
+  createUpdateDirectory() {
+    fsSync.mkdirSync(this.directory, { recursive: true, mode: 0o700 });
+    if (fsSync.lstatSync(this.directory).isSymbolicLink()) throw new Error('The update directory is a symbolic link');
+  }
+
+  claimWork() {
+    if (processMarkers(this.activationLock).some(markerIsLive)) {
+      throw new Error('Wait for the Pi Swarm update to finish before starting a task');
+    }
+    let lease;
+    try {
+      if (this.installationLayoutBlock()) return undefined;
+      this.createUpdateDirectory();
+      fsSync.mkdirSync(this.workDir, { recursive: true, mode: 0o700 });
+      if (fsSync.lstatSync(this.workDir).isSymbolicLink()) return undefined;
+      lease = path.join(this.workDir, `${process.pid}-${randomUUID()}`);
+      fsSync.writeFileSync(lease, '', { mode: 0o600, flag: 'wx' });
+    } catch (err) {
+      // Read-only or legacy installations can keep running tasks.
+      if (['EACCES', 'EPERM', 'EROFS'].includes(err.code)) return undefined;
+      throw err;
+    }
+    const release = () => {
+      try {
+        fsSync.rmSync(lease, { force: true });
+      } catch (err) {
+        console.error('Pi Swarm could not release its update work lease:', err.message);
+      }
+    };
+    // Write the work lease before checking the lock. The installer does
+    // the opposite so a worker cannot start during the directory switch.
+    if (processMarkers(this.activationLock).some(markerIsLive)) {
+      release();
+      throw new Error('Wait for the Pi Swarm update to finish before starting a task');
+    }
+    return release;
+  }
+
+  lockActivation() {
+    const staging = fsSync.mkdtempSync(path.join(this.directory, 'lock-'));
+    const marker = `${process.pid}-${randomUUID()}`;
+    try {
+      fsSync.writeFileSync(path.join(staging, marker), '', { mode: 0o600 });
+      for (const name of processMarkers(this.activationLock)) {
+        if (!markerIsLive(name)) fsSync.rmSync(path.join(this.activationLock, name), { force: true });
+      }
+      removeEmptyDirectory(this.activationLock);
+      // A nonempty lock cannot be replaced by this rename.
+      fsSync.renameSync(staging, this.activationLock);
+    } catch (err) {
+      if (['EEXIST', 'ENOTEMPTY', 'EPERM'].includes(err.code)
+        && processMarkers(this.activationLock).some(markerIsLive)) {
+        throw new UpdateError('installationBusy', 'Another update is applying on this host');
+      }
+      throw err;
+    } finally {
+      fsSync.rmSync(staging, { recursive: true, force: true });
+    }
+    return () => {
+      fsSync.rmSync(path.join(this.activationLock, marker), { force: true });
+      removeEmptyDirectory(this.activationLock);
+    };
   }
 
   async releaseFromWeb() {
@@ -248,10 +342,8 @@ export class PluginUpdates {
         || createHash('sha256').update(archive).digest('hex') !== match[1].toLowerCase()) {
         throw new UpdateError('checksumFailed', 'The release archive does not match its SHA-256 file');
       }
-      const updatesDir = path.join(path.dirname(this.root), '.swarm-pi-updates');
-      await fs.mkdir(updatesDir, { recursive: true, mode: 0o700 });
-      if ((await fs.lstat(updatesDir)).isSymbolicLink()) throw new Error('The update directory is a symbolic link');
-      staging = await fs.mkdtemp(path.join(updatesDir, 'update-'));
+      this.createUpdateDirectory();
+      staging = await fs.mkdtemp(path.join(this.directory, 'update-'));
       await extractPackage(archive, staging);
       const replacement = path.join(staging, 'swarm-pi');
       const manifest = readManifest(replacement);
@@ -259,13 +351,8 @@ export class PluginUpdates {
         throw new UpdateError('invalidPackage', 'The archive manifest does not match the selected Swarm Pi release');
       }
 
-      const lock = path.join(updatesDir, 'install.lock');
-      try {
-        fsSync.mkdirSync(lock, { mode: 0o700 });
-      } catch (err) {
-        if (err.code === 'EEXIST') throw new UpdateError('installationBusy', 'Another update is applying on this host');
-        throw err;
-      }
+      this.assertInstallable();
+      const unlock = this.lockActivation();
       try {
         this.assertInstallable();
         backup = path.join(staging, `previous-v${installed}`);
@@ -281,7 +368,7 @@ export class PluginUpdates {
           throw installError;
         }
       } finally {
-        fsSync.rmSync(lock, { recursive: true, force: true });
+        unlock();
       }
       return { status: 'installed', installedVersion: release.version, backupPath: backup };
     } finally {

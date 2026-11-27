@@ -83,7 +83,9 @@ Boards and queues live in the MCP process. The plugin data directory contains ta
 
 In **Settings → Plugin updates**, select **Check for updates** to compare the running plugin with the latest stable GitHub release. For an eligible release installation, select **Install update** and confirm. The updater verifies the archive against its SHA-256 file and keeps a backup of the previous plugin directory. Running and queued work blocks installation.
 
-Reload the plugin in Antigravity when you are ready to switch versions. Reloading clears open boards. Settings and session data stored outside the plugin directory are kept. For a Git checkout, use Git to update it.
+Reload the plugin in Antigravity when you are ready to switch versions. Reloading clears open boards. Settings and session data stored outside the plugin directory are kept. For a Git checkout, use Git to update it. For a linked plugin directory, update the source directory.
+
+If the panel reports that data is inside the plugin directory, finish all tasks and exit Antigravity. Copy the data directory (usually `.data`) to a location outside the plugin directory and verify the backup. Run the installer with the original installation target, then copy the data back to its original path before opening Antigravity. The manual installer replaces the target directory.
 
 ### Native Antigravity Subagent Mode (recommended)
 
