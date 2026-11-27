@@ -38,7 +38,17 @@ codex login
 
 ## 快速安装
 
-### 方式一：从 GitHub Release 下载零依赖安装包
+### 方式一：用自然语言让 Antigravity 安装
+
+把这段话发给 Antigravity。
+
+```text
+请从 https://github.com/KLOSYX/agy-swarm-pi 安装 Swarm Pi 插件。
+根据我当前的操作系统，按仓库说明选择合适的安装方式。
+安装完成后，确认 Swarm Pi 已启用，并告诉我在哪里打开面板。
+```
+
+### 方式二：从 GitHub Release 下载零依赖安装包
 
 从 [GitHub Releases](https://github.com/KLOSYX/agy-swarm-pi/releases) 下载对应版本的安装包。以下以 v0.5.0 为例。
 
@@ -54,7 +64,7 @@ tar -xzf swarm-pi-v0.5.0.tar.gz
 ./swarm-pi/install.sh --workspace /path/to/your/repo
 ```
 
-### 方式二：直接 `git clone` 安装
+### 方式三：直接 `git clone` 安装
 
 ```bash
 git clone https://github.com/KLOSYX/agy-swarm-pi.git

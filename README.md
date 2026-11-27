@@ -35,6 +35,16 @@ codex login
 
 ## Install
 
+### Ask Antigravity to install it
+
+Paste this into an Antigravity conversation.
+
+```text
+Install the Swarm Pi plugin from https://github.com/KLOSYX/agy-swarm-pi.
+Follow the repository's installation instructions for my operating system.
+After installation, verify that Swarm Pi is enabled and tell me how to open its panel.
+```
+
 ### From a GitHub release
 
 Download the version you want from [GitHub Releases](https://github.com/KLOSYX/agy-swarm-pi/releases). This example installs v0.5.0.
