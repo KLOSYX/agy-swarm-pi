@@ -15,7 +15,6 @@ const INCLUDE_PATHS = [
   'README.zh-CN.md',
   'LICENSE',
   'install.sh',
-  'agents/swarm-pi-worker.md',
   'assets/logo.svg',
   'bin/start-server.sh',
   'bin/server.bundle.mjs',
@@ -25,6 +24,7 @@ const INCLUDE_PATHS = [
   'sidecars/coordinator/sidecar.json',
   'sidecars/coordinator/main.mjs',
   'skills/swarm_pi/SKILL.md',
+  'skills/swarm_pi/native-worker.md',
   'ui/dist/settings.html',
 ];
 

@@ -96,7 +96,6 @@ else
     LICENSE \
     install.sh \
     assets \
-    agents \
     bin \
     sidecars \
     skills \

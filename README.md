@@ -8,7 +8,7 @@ Run named Pi or Codex workers in parallel from Google Antigravity with `/swarm_p
 
 ## Features
 
-- **Native Antigravity subagents**. A lightweight wrapper dispatches and monitors each assignment through `swarm-pi_pi`. Antigravity displays the wrapper in its native Subagents UI and wakes the coordinator on completion. Pi or Codex performs the work.
+- **Native Antigravity subagents**. A lightweight wrapper monitors each dispatched assignment through `swarm-pi_pi`. Antigravity displays the wrapper in its native Subagents UI and wakes the coordinator on completion. Pi or Codex performs the work.
 - **Named workers and shared messages**. Workers can hand off tasks with `@mentions`. Each worker keeps its session and working directory for follow-ups. Select a worker's Subagent card in the Pi Swarm panel to inspect its brief, latest task status and elapsed time, tool calls, model, worktree, and log path when available.
 - **Git worktree isolation**. Give parallel writers separate worktrees and `swarm-pi/*` branches. Review the changes and clean up the worktrees when finished.
 - **Per-role settings**. Configure model, reasoning, and timeout for roles such as coder, verifier, and researcher. Pi exposes a tool allowlist. Codex exposes a sandbox setting.
@@ -89,7 +89,7 @@ If the panel reports that data is inside the plugin directory, finish all tasks 
 
 ### Native Antigravity Subagent Mode (recommended)
 
-By default, `/swarm_pi` uses `invoke_subagent` with `Model="flash_lite"` to launch the bundled `swarm-pi-worker` for each assignment ready to run. The coordinator ends the main turn after launch. Each wrapper monitors its Pi or Codex worker through `swarm-pi_pi`. Antigravity shows the wrapper in its native **Subagents** list and chat, then wakes the coordinator with its completion report. The main conversation uses zero polling. The wrapper adds host-model tokens for dispatching, monitoring, and reporting. Pi or Codex performs all implementation and verification. [Antigravity custom subagents](https://antigravity.google/docs/subagents/#subagent-lifecycle-and-states)
+By default, `/swarm_pi` registers a native monitor through `define_subagent` with `EnableMCPTools: true`. The coordinator posts each assignment once and passes its message number to a monitor started with `invoke_subagent`. Antigravity shows the monitor in its native **Subagents** list and wakes the coordinator on completion. The monitor reads the board through `swarm-pi_pi` under the existing host permissions. If native registration, startup, or MCP access fails, the coordinator follows the same board in Direct MCP Board Mode and keeps the existing assignments. [Antigravity custom subagents](https://antigravity.google/docs/subagents/#subagent-lifecycle-and-states)
 
 ### Direct MCP Board Mode (fallback)
 

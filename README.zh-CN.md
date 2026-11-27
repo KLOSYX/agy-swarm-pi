@@ -8,10 +8,10 @@
 
 ## 特性
 
-- **Antigravity 原生子代理**。轻量转发代理通过 `swarm-pi_pi` 派发和跟踪任务，在 Antigravity 原生 Subagents 界面中可见，任务结束后自动唤醒协调器。实际工作由 Pi 或 Codex 执行。
+- **Antigravity 原生子代理**。轻量转发代理通过 `swarm-pi_pi` 跟踪已派发的任务，在 Antigravity 原生 Subagents 界面中可见，任务结束后自动唤醒协调器。实际工作由 Pi 或 Codex 执行。
 - **Git Worktree 隔离**。`pi_submit_task(..., worktree: true)` 为并发写入创建独立 worktree 和 `swarm-pi/*` 分支。任务完成后可查看变更并清理工作树。
 - **共享消息板和角色设置**。在 Pi Swarm 面板选择成员的 Subagent 卡片，可查看该成员的职责说明，以及最近任务的状态、耗时、工具调用、模型、工作树和日志路径等可用信息。可为 `coder`、`verifier`、`researcher` 等角色配置模型、推理档位和超时。Pi 可配置工具白名单，Codex 可配置沙箱。
-- **预构建安装包**。仓库和 Release 包包含 MCP 服务、面板与原生子代理定义。Antigravity 直接通过 Node.js 启动服务。
+- **预构建安装包**。仓库和 Release 包包含 MCP 服务、面板与原生监控子 Agent 的提示词。Antigravity 直接通过 Node.js 启动服务。
 
 ---
 
@@ -93,7 +93,7 @@ agy plugin install ./agy-swarm-pi
 
 ### Antigravity 原生子代理模式（推荐）
 
-`/swarm_pi` 默认通过 `invoke_subagent` 以 `Model="flash_lite"` 为每个可执行的任务启动随插件提供的 `swarm-pi-worker`。协调器启动后结束主对话当前轮次。转发代理通过 `swarm-pi_pi` 跟踪 Pi 或 Codex 任务，在 Antigravity 原生 **Subagents** 列表和聊天中可见。任务完成时，Antigravity 会用完成报告唤醒协调器，主对话无需轮询。转发代理的派发、等待和汇报会消耗宿主模型 token。实际实现和验证由 Pi 或 Codex 执行。[Antigravity 原生子代理文档](https://antigravity.google/docs/subagents/#subagent-lifecycle-and-states)
+`/swarm_pi` 默认通过 `define_subagent` 注册原生监控子 Agent，并显式设置 `EnableMCPTools: true`。协调器只发布一次任务，把消息编号交给 `invoke_subagent` 启动的监控子 Agent。Antigravity 在原生 **Subagents** 列表显示监控会话，并在它报告结果时唤醒协调器。监控子 Agent 在宿主现有权限下通过 `swarm-pi_pi` 读取看板。如果原生定义、启动或 MCP 访问失败，协调器切换到 Direct MCP，沿用原看板及已发布的任务。[Antigravity 原生子代理文档](https://antigravity.google/docs/subagents/#subagent-lifecycle-and-states)
 
 ### MCP 直连消息板模式（备用）
 
