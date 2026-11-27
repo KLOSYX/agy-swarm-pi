@@ -1,0 +1,7 @@
+{
+  "command": "node",
+  "args": ["main.mjs"],
+  "display_name": "Pi Swarm Coordinator",
+  "description": "Wake the Antigravity conversation that owns a Pi Swarm when a new board message needs its attention.",
+  "restart_policy": "always"
+}

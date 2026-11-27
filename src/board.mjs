@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { CoordinatorWake } from './coordinator-wake.mjs';
 
 const MAX_HANDOFFS = 8;
 const ROUTE = /^SWARM_POST @([a-z0-9_-]+) (.+)$/;
@@ -11,9 +12,10 @@ export class SwarmBoards {
     this.taskManager = taskManager;
     this.settingsStore = settingsStore;
     this.boards = new Map();
+    this.coordinatorWake = new CoordinatorWake(taskManager.dataDir);
   }
 
-  async create({ title, cwd, members }) {
+  async create({ title, cwd, members, hostBinding }) {
     if (!path.isAbsolute(cwd) || !(await fs.stat(cwd).catch(() => null))?.isDirectory()) {
       throw new Error('Swarm cwd must be an existing absolute directory');
     }
@@ -28,7 +30,11 @@ export class SwarmBoards {
     }
     const id = randomUUID();
     const { harness } = await this.settingsStore.load();
-    const board = { id, title, harness, roster, messages: [], waiters: new Set(), closed: false };
+    const coordinator = this.coordinatorWake.binding(hostBinding);
+    const board = {
+      id, title, harness, roster, coordinator, messages: [], waiters: new Set(), closed: false,
+      watching: false, wakeCursor: 0, pendingWake: 0,
+    };
     this.boards.set(id, board);
     return this.snapshot(board);
   }
@@ -45,6 +51,40 @@ export class SwarmBoards {
 
   read(id, after = 0) {
     return this.snapshot(this.get(id), after);
+  }
+
+  watch(id, after = 0, hostBinding) {
+    const board = this.get(id);
+    if (board.closed) throw new Error('This Pi Swarm is closed');
+    const coordinator = this.coordinatorWake.binding(hostBinding);
+    if (board.coordinator && coordinator?.conversationId !== board.coordinator.conversationId) {
+      throw new Error('Only the owning Antigravity conversation can watch this board');
+    }
+    if (!board.coordinator || !this.coordinatorWake.ready()) return this.snapshot(board, after);
+    board.watching = true;
+    const latest = board.messages.findLast((entry) => entry.to === 'coordinator' || entry.kind === 'error');
+    const cursor = this.settled(board) ? board.messages.length : latest?.number ?? 0;
+    if (cursor > after) this.notifyCoordinator(board, cursor);
+    return this.snapshot(board, after);
+  }
+
+  settled(board) {
+    const members = [...board.roster.values()];
+    return members.some((member) => member.turns > 0)
+      && members.every((member) => member.status !== 'working' && member.queue.length === 0);
+  }
+
+  notifyCoordinator(board, number) {
+    if (board.closed || !board.watching) return;
+    board.pendingWake = Math.max(board.pendingWake, number);
+    clearTimeout(board.wakeRetry);
+    try {
+      this.coordinatorWake.publish(board, board.pendingWake);
+    } catch (err) {
+      console.error('Pi Swarm could not queue a coordinator wake; retrying:', err.message);
+      board.wakeRetry = setTimeout(() => this.notifyCoordinator(board, board.pendingWake), 2000);
+      board.wakeRetry.unref();
+    }
   }
 
   async waitForMessages(id, after = 0, waitMs = 0, { member } = {}) {
@@ -81,7 +121,9 @@ export class SwarmBoards {
     if ([...board.roster.values()].some((member) => member.status === 'working')) {
       throw new Error('Wait for active members before closing the swarm');
     }
+    this.coordinatorWake.close(board);
     board.closed = true;
+    clearTimeout(board.wakeRetry);
     for (const wake of board.waiters) wake();
     for (const member of board.roster.values()) {
       if (member.worktreeTaskId) this.taskManager.worktreeLeases.delete(member.worktreeTaskId);
@@ -110,6 +152,7 @@ export class SwarmBoards {
     };
     board.messages.push(entry);
     for (const wake of board.waiters) wake(entry);
+    if (to === 'coordinator' || kind === 'error') this.notifyCoordinator(board, entry.number);
     return entry;
   }
 
@@ -198,11 +241,14 @@ export class SwarmBoards {
     }
     member.status = member.lastTurnFailed ? 'blocked' : 'waiting';
     for (const wake of board.waiters) wake();
+    if (this.settled(board)) this.notifyCoordinator(board, board.messages.length);
   }
 
   snapshot(board, after = 0) {
     return {
       id: board.id, title: board.title, harness: board.harness, closed: board.closed,
+      coordinatorBound: Boolean(board.coordinator),
+      coordinatorWakeReady: board.watching && !board.closed && this.coordinatorWake.ready(),
       members: [...board.roster.values()].map((member) => {
         const task = member.taskId && this.taskManager.tasks.get(member.taskId);
         const snapshot = task && this.taskManager.formatTaskSnapshot(task);

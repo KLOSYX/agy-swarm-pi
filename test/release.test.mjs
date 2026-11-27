@@ -26,8 +26,8 @@ test('the release archives and installer retain the worker proxy and bundled pan
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   const fixture = path.join(dir, 'source');
   await Promise.all([
-    'plugin.json', 'mcp_config.json', 'README.md', 'README.zh-CN.md', 'LICENSE', 'install.sh',
-    'agents', 'assets', 'bin', 'skills', 'scripts/pack-release.mjs', 'ui/dist/settings.html',
+    'plugin.json', 'mcp_config.json', 'hooks.json', 'README.md', 'README.zh-CN.md', 'LICENSE', 'install.sh',
+    'agents', 'assets', 'bin', 'sidecars', 'skills', 'scripts/pack-release.mjs', 'ui/dist/settings.html',
   ].map(async (entry) => {
     const target = path.join(fixture, entry);
     await fs.mkdir(path.dirname(target), { recursive: true });
@@ -58,7 +58,10 @@ test('the release archives and installer retain the worker proxy and bundled pan
     pluginDirs.push(target);
   }
 
-  for (const entry of [agentPath, 'ui/dist/settings.html']) {
+  for (const entry of [
+    agentPath, 'ui/dist/settings.html', 'hooks.json', 'bin/coordinator-files.mjs', 'bin/coordinator-hook.mjs',
+    'bin/host-binding.mjs', 'sidecars/coordinator/sidecar.json', 'sidecars/coordinator/main.mjs',
+  ]) {
     const expected = await fs.readFile(path.join(root, entry));
     for (const pluginDir of pluginDirs) {
       assert.deepEqual(await fs.readFile(path.join(pluginDir, entry)), expected);

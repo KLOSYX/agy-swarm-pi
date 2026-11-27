@@ -91,6 +91,14 @@ agy plugin install ./agy-swarm-pi
 
 如果希望省去宿主转发代理的轮次，可以在 `/swarm_pi` 请求中指定 MCP 直连消息板模式。协调器直接通过 `swarm-pi_pi` 派发和读取消息。两种模式都可以在 Pi Swarm 侧边面板查看原生风格的 Subagent 卡片和成员详情。
 
+如需按事件自动跟进，在 Antigravity 的 `~/.gemini/config/config.json` 中合并以下配置，并在启动新蜂群前重新加载 Antigravity。
+
+```json
+{"sidecars": {"swarm-pi/coordinator": {"enabled": true}}}
+```
+
+协调器通过 `pi_swarm_watch` 订阅原看板，派工后结束当前回合。发给协调器的消息、成员报错或队列全部执行完毕时，Sidecar 会唤醒原会话。原生转发代理失败时，可在同一看板开启订阅，只补发缺失的任务。[Antigravity Sidecar 文档](https://antigravity.google/docs/sidecars/#agentapi)
+
 ---
 
 ## 本地开发与打包

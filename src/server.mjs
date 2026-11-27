@@ -30,6 +30,8 @@ const PLUGIN_ROOT = process.env.PLUGIN_ROOT || path.resolve(__dirname, '..');
 const SETTINGS_APP_URI = 'ui://swarm-pi/settings.html';
 const memberName = z.string().regex(/^[a-z0-9_-]{1,32}$/);
 const boardId = z.string().uuid();
+const hostBinding = z.object({ conversationId: z.string().uuid(), proof: z.string().uuid() })
+  .optional().describe('Injected by the Antigravity hook. Omit when calling this tool.');
 const postShape = {
   boardId, to: memberName, text: z.string().trim().min(1).max(4000),
 };
@@ -382,7 +384,7 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
   });
   boardTool('pi_create_swarm', 'Create a shared Pi Swarm board and its named worker roster.', {
     title: z.string().trim().min(1).max(120),
-    cwd: z.string(),
+    cwd: z.string(), hostBinding,
     members: z.array(z.object({
       name: memberName,
       role: z.string().optional(),
@@ -394,6 +396,9 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
       timeoutSec: z.number().int().min(10).max(7200).optional(),
     })).min(1).max(12),
   }, (args) => boards.create(args));
+  boardTool('pi_swarm_watch', 'Arm Direct MCP coordinator wakes on this existing board. The owner can finish the turn when coordinatorWakeReady is true.', {
+    ...readBoardShape, hostBinding,
+  }, ({ boardId, after, hostBinding }) => boards.watch(boardId, after, hostBinding));
   boardTool('pi_swarm_post', 'Post as the coordinator and wake or queue the named worker. Returns the exact postedMessageNumber for matching replies.', postShape,
     ({ boardId, to, text }) => boards.post(boardId, 'coordinator', to, text));
   boardTool('pi_swarm_read', 'Read member status, latest task telemetry, and up to 50 messages after the cursor. With member and waitMs, wait for that worker to finish, a message involving that worker, or board closure. Returns the full board page.', {

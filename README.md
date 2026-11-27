@@ -87,6 +87,14 @@ By default, `/swarm_pi` uses `invoke_subagent` with `Model="flash_lite"` to laun
 
 Ask for Direct MCP Board Mode in your `/swarm_pi` request when you want zero host-wrapper turns. The coordinator dispatches and reads the board through `swarm-pi_pi` directly. The Pi Swarm side panel shows native-style Subagent cards and a per-worker inspector in both modes.
 
+Enable the bundled coordinator sidecar in Antigravity's `~/.gemini/config/config.json` to use event-driven follow-up. Merge this entry into the existing configuration and reload Antigravity before starting a new swarm.
+
+```json
+{"sidecars": {"swarm-pi/coordinator": {"enabled": true}}}
+```
+
+The coordinator subscribes with `pi_swarm_watch`, dispatches work, and ends the turn. An addressed message, worker error, or completion of all queued work wakes the original conversation. If a native wrapper fails, the coordinator can subscribe to its existing board and dispatch only the missing assignments. [Antigravity Sidecars](https://antigravity.google/docs/sidecars/#agentapi)
+
 ## Develop and package
 
 ```bash

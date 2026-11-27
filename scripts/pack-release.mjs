@@ -10,6 +10,7 @@ const pluginRoot = path.resolve(__dirname, '..');
 const INCLUDE_PATHS = [
   'plugin.json',
   'mcp_config.json',
+  'hooks.json',
   'README.md',
   'README.zh-CN.md',
   'LICENSE',
@@ -18,6 +19,11 @@ const INCLUDE_PATHS = [
   'assets/logo.svg',
   'bin/start-server.sh',
   'bin/server.bundle.mjs',
+  'bin/coordinator-files.mjs',
+  'bin/coordinator-hook.mjs',
+  'bin/host-binding.mjs',
+  'sidecars/coordinator/sidecar.json',
+  'sidecars/coordinator/main.mjs',
   'skills/swarm_pi/SKILL.md',
   'ui/dist/settings.html',
 ];

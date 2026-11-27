@@ -90,6 +90,7 @@ else
   for rel in \
     plugin.json \
     mcp_config.json \
+    hooks.json \
     README.md \
     README.zh-CN.md \
     LICENSE \
@@ -97,6 +98,7 @@ else
     assets \
     agents \
     bin \
+    sidecars \
     skills \
     ui
   do

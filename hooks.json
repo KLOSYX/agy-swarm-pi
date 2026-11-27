@@ -1,0 +1,19 @@
+{
+  "swarm-pi-coordinator": {
+    "PreToolUse": [
+      {
+        "matcher": "^(call_mcp_tool|mcp_+swarm[-_]pi_pi_+pi_(create_swarm|swarm_watch))$",
+        "hooks": [{ "type": "command", "command": "node ./bin/coordinator-hook.mjs tool", "timeout": 5 }]
+      }
+    ],
+    "PreInvocation": [
+      { "type": "command", "command": "node ./bin/coordinator-hook.mjs busy", "timeout": 5 }
+    ],
+    "PostInvocation": [
+      { "type": "command", "command": "node ./bin/coordinator-hook.mjs idle", "timeout": 5 }
+    ],
+    "Stop": [
+      { "type": "command", "command": "node ./bin/coordinator-hook.mjs idle", "timeout": 5 }
+    ]
+  }
+}
