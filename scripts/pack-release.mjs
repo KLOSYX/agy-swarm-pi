@@ -16,6 +16,8 @@ const INCLUDE_PATHS = [
   'LICENSE',
   'install.sh',
   'assets/logo.svg',
+  'assets/readme-header.en.webp',
+  'assets/readme-header.zh-CN.webp',
   'bin/start-server.sh',
   'bin/server.bundle.mjs',
   'bin/coordinator-files.mjs',

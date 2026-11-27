@@ -2,9 +2,13 @@
 
 English · [简体中文](README.zh-CN.md)
 
+![Gemini coordinates. GPT gets to work. A sample search feature is split into implementation, testing, and review in the Swarm Pi board.](assets/readme-header.en.webp)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Run named Pi or Codex workers in parallel from Google Antigravity with `/swarm_pi`. Choose one active harness in the Pi Swarm panel, then use the shared board to follow work and send instructions.
+Run `/swarm_pi` in **Google Antigravity** to split a task among named workers. With **Codex** selected, Gemini plans and assigns the work, and GPT implements features, writes tests, and reviews changes through the Codex CLI. Choose **Pi** to run those workers with your configured model provider.
+
+**Save Antigravity quota for coordination.** Worker execution uses the selected CLI's own credentials and provider quota. Gemini still uses Antigravity for planning, dispatch, and follow-up. Track progress, handoffs, and results on a shared board, and give parallel writers separate Git worktrees.
 
 ## Features
 
@@ -30,6 +34,16 @@ codex login
 ```
 
 ## Install
+
+### Ask Antigravity to install it
+
+Paste this into an Antigravity conversation.
+
+```text
+Install the Swarm Pi plugin from https://github.com/KLOSYX/agy-swarm-pi.
+Follow the repository's installation instructions for my operating system.
+After installation, verify that Swarm Pi is enabled and tell me how to open its panel.
+```
 
 ### From a GitHub release
 
