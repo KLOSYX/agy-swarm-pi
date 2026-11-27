@@ -112,6 +112,8 @@ fs.writeFileSync(${JSON.stringify(capture)}, JSON.stringify(process.argv.slice(2
   assert.equal(await readJson(pending), null, 'Routine progress must leave coordinator idle');
   finish.get('verifier')({ ...coderResult, result_text: 'Second private result' });
   await until(async () => (await readJson(pending))?.number === 4);
+  await delay(1250);
+  assert.equal(await readFile(failFirst).catch(() => null), null, 'Busy coordinator must have no delivery attempt');
   assert.equal(await readJson(capture), null);
   runHook('idle');
   await until(() => readFile(failFirst).catch(() => null));

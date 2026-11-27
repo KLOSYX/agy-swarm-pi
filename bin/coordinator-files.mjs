@@ -22,4 +22,3 @@ export function writeJsonAtomic(filename, value) {
     fs.rmSync(temporary, { force: true });
   }
 }
-

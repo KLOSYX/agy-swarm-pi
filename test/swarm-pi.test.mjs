@@ -503,6 +503,10 @@ test('the plugin manifest starts the bundled MCP panel directly with Node', asyn
         arguments: { title: 'Bundle smoke test', cwd: root, members: [{ name: 'coder', brief: 'Review the build' }] },
       });
       assert.equal(board.structuredContent.members[0].brief, 'Review the build');
+      const watch = await client.callTool({
+        name: 'pi_swarm_watch', arguments: { boardId: board.structuredContent.id },
+      });
+      assert.equal(watch.structuredContent.coordinatorWakeReady, false);
     } finally {
       await client.close();
     }
