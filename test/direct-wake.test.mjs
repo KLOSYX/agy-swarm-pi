@@ -31,7 +31,7 @@ async function until(check, timeout = 5000) {
   assert.fail('Timed out waiting for the coordinator wake');
 }
 
-test('Direct MCP waits for board events and wakes only its idle owner', { skip: process.platform === 'win32' }, async (t) => {
+test('an owned board subscribes at creation and wakes only after the owner stops', { skip: process.platform === 'win32' }, async (t) => {
   const appData = await mkdtemp(path.join(tmpdir(), 'swarm-direct-wake-'));
   const dataDir = path.join(appData, 'plugin_data', 'swarm-pi');
   const runtimeDir = path.join(appData, 'sidecar_data', 'swarm-pi', 'coordinator', 'data');
@@ -43,9 +43,9 @@ test('Direct MCP waits for board events and wakes only its idle owner', { skip: 
       input: JSON.stringify({ transcriptPath, conversationId, toolCall }),
     }));
   }
-  const bindingFor = (toolName) => runHook('tool', {
-    name: 'call_mcp_tool', args: { ServerName: 'swarm-pi_pi', ToolName: toolName, Arguments: {} },
-  }).overwrite.Arguments.hostBinding;
+  const binding = runHook('tool', {
+    name: 'mcp_swarm-pi_pi_pi_create_swarm', args: {},
+  }).overwrite.hostBinding;
 
   const capture = path.join(appData, 'capture.json');
   const failFirst = path.join(appData, 'attempted');
@@ -90,18 +90,17 @@ fs.writeFileSync(${JSON.stringify(capture)}, JSON.stringify(process.argv.slice(2
   taskManager.submit = async ({ cwd, label }) => ({ task_id: label, cwd });
   taskManager.waitForCompletion = (id) => new Promise((resolve) => finish.set(id, resolve));
   const coderResult = { status: 'completed', result_text: 'Private worker result' };
-  const { id } = await success('pi_create_swarm', {
-    title: 'Direct watch', cwd: appData, hostBinding: bindingFor('pi_create_swarm'),
+  await until(() => readJson(path.join(directory, 'ready.json')));
+  const { id, coordinatorWakeReady } = await success('pi_create_swarm', {
+    title: 'Direct watch', cwd: appData, hostBinding: binding,
     members: [{ name: 'coder' }, { name: 'verifier' }],
   });
   const pending = path.join(directory, 'pending', `${id}.json`);
-  await until(() => readJson(path.join(directory, 'ready.json')));
+  assert.equal(coordinatorWakeReady, true);
   const other = updateBinding(appData, randomUUID(), true, true);
   const denied = await call('pi_swarm_watch', { boardId: id, after: 0, hostBinding: other });
   assert.ok(denied.isError);
   assert.match(denied.content[0].text, /owning Antigravity conversation/);
-  const watch = await success('pi_swarm_watch', { boardId: id, after: 0, hostBinding: bindingFor('pi_swarm_watch') });
-  assert.equal(watch.coordinatorWakeReady, true);
   runHook('busy');
 
   await success('pi_swarm_post', { boardId: id, to: 'coder', text: 'Start first task' });
@@ -128,40 +127,42 @@ fs.writeFileSync(${JSON.stringify(capture)}, JSON.stringify(process.argv.slice(2
   const args = await until(() => readJson(capture));
   assert.deepEqual(args.slice(0, 2), ['send-message', conversationId]);
   assert.ok(args[2].includes(id) && args[2].includes('#4') && !args[2].includes('private'));
+  assert.match(args[2], /waitMs=0/);
   await until(async () => (await readJson(cursor))?.sent === 4);
   await success('pi_swarm_close', { boardId: id });
   assert.equal(await readJson(pending), null);
 });
 
-test('coordinator posts and errors wake before the remaining worker finishes', async (t) => {
+test('an unavailable sidecar does not lose coordinator posts or errors', async (t) => {
   const appData = await mkdtemp(path.join(tmpdir(), 'swarm-wake-targets-'));
   t.after(() => rm(appData, { recursive: true, force: true }));
   const dataDir = path.join(appData, 'plugin_data', 'swarm-pi');
   const wakeDir = path.join(dataDir, 'direct-wake');
-  await mkdir(wakeDir, { recursive: true });
-  writeJsonAtomic(path.join(wakeDir, 'ready.json'), { pid: process.pid });
 
   const hostBinding = updateBinding(appData, randomUUID(), false, true);
   const { boards, taskManager } = createSwarmPiServer({ dataDir });
   const finish = new Map();
   taskManager.submit = async ({ cwd, label }) => ({ task_id: label, cwd });
   taskManager.waitForCompletion = (id) => new Promise((resolve) => finish.set(id, resolve));
-  const { id } = await boards.create({
+  const { id, coordinatorWakeReady } = await boards.create({
     title: 'Actionable reports', cwd: appData, hostBinding,
     members: [{ name: 'sender' }, { name: 'failing' }, { name: 'active' }],
   });
   const pending = path.join(wakeDir, 'pending', `${id}.json`);
+  assert.equal(coordinatorWakeReady, false);
 
   for (const name of ['sender', 'failing', 'active']) await boards.post(id, 'coordinator', name, 'Start task');
   await until(() => finish.size === 3);
   finish.get('sender')({ status: 'completed', result_text: 'SWARM_POST @coordinator Action required' });
   await until(() => boards.read(id).members[0].status === 'waiting');
-  assert.equal(await readJson(pending), null, 'Native mode must not emit a second coordinator wake');
-  assert.equal(boards.watch(id, 4, hostBinding).coordinatorWakeReady, true);
-  assert.equal((await readJson(pending)).number, 5, 'Fallback catches up on the addressed report');
+  assert.equal((await readJson(pending)).number, 5, 'An addressed report is queued while the sidecar is unavailable');
+  assert.equal(boards.watch(id, 4, hostBinding).coordinatorWakeReady, false);
   finish.get('failing')({ status: 'failed', error_text: 'Fixture worker failed' });
   await until(async () => (await readJson(pending))?.number === 6);
   assert.equal(boards.read(id).members[2].status, 'working');
+  writeJsonAtomic(path.join(wakeDir, 'ready.json'), { pid: process.pid });
+  assert.equal(boards.watch(id, 4, hostBinding).coordinatorWakeReady, true);
+  assert.equal((await readJson(pending)).number, 6, 'An earlier cursor must not replace a newer queued error');
   finish.get('active')({ status: 'completed', result_text: 'All done' });
   await until(async () => (await readJson(pending))?.number === 7);
 });

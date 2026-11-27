@@ -55,7 +55,7 @@ async function wake(filename, attempted) {
   const now = Date.now();
   writeJsonAtomic(cursorPath, { sent: cursor?.sent ?? 0, attemptedAt: now });
   writeJsonAtomic(conversationPath, { at: now, bindingUpdatedAt: binding.updatedAt });
-  const prompt = `Pi Swarm coordinator wake. Board ID: ${boardId}, latest addressed post: #${number}. Read this existing board with swarm-pi_pi pi_swarm_read. Handle actionable reports and finish the turn promptly if work is still underway.`;
+  const prompt = `Pi Swarm coordinator wake. Board ID: ${boardId}, new posts through #${number}. Read the existing board with swarm-pi_pi pi_swarm_read (waitMs=0), starting after the last handled post. Read additional available pages if needed. Handle actionable reports once and finish the turn to await further events.`;
   await run('agentapi', ['send-message', conversationId, prompt], { timeout: 12000 });
   writeJsonAtomic(cursorPath, { sent: number, attemptedAt: 0 });
   console.log(`Pi Swarm coordinator wake delivered for board ${boardId} post #${number}`);

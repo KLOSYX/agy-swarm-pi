@@ -33,7 +33,7 @@ export class SwarmBoards {
     const coordinator = this.coordinatorWake.binding(hostBinding);
     const board = {
       id, title, harness, roster, coordinator, messages: [], waiters: new Set(), closed: false,
-      watching: false, wakeCursor: 0, pendingWake: 0,
+      wakeCursor: 0, pendingWake: 0,
     };
     this.boards.set(id, board);
     return this.snapshot(board);
@@ -65,8 +65,7 @@ export class SwarmBoards {
     if (board.coordinator && coordinator?.conversationId !== board.coordinator.conversationId) {
       throw new Error('Only the owning Antigravity conversation can watch this board');
     }
-    if (!board.coordinator || !this.coordinatorWake.ready()) return this.snapshot(board, after);
-    board.watching = true;
+    if (!board.coordinator) return this.snapshot(board, after);
     const latest = board.messages.findLast((entry) => entry.to === 'coordinator' || entry.kind === 'error');
     const cursor = this.settled(board) ? board.messages.length : latest?.number ?? 0;
     if (cursor > after) this.notifyCoordinator(board, cursor);
@@ -80,7 +79,7 @@ export class SwarmBoards {
   }
 
   notifyCoordinator(board, number) {
-    if (board.closed || !board.watching) return;
+    if (board.closed || !board.coordinator) return;
     board.pendingWake = Math.max(board.pendingWake, number);
     clearTimeout(board.wakeRetry);
     try {
@@ -259,7 +258,7 @@ export class SwarmBoards {
     return {
       id: board.id, title: board.title, harness: board.harness, closed: board.closed,
       coordinatorBound: Boolean(board.coordinator),
-      coordinatorWakeReady: board.watching && !board.closed && this.coordinatorWake.ready(),
+      coordinatorWakeReady: Boolean(board.coordinator) && !board.closed && this.coordinatorWake.ready(),
       members: [...board.roster.values()].map((member) => {
         const task = member.taskId && this.taskManager.tasks.get(member.taskId);
         const snapshot = task && this.taskManager.formatTaskSnapshot(task);

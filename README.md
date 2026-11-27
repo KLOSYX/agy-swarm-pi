@@ -8,11 +8,11 @@ Run named Pi or Codex workers in parallel from Google Antigravity with `/swarm_p
 
 ## Features
 
-- **Native Antigravity subagents**. A lightweight wrapper monitors each dispatched assignment through `swarm-pi_pi`. Antigravity displays the wrapper in its native Subagents UI and wakes the coordinator on completion. Pi or Codex performs the work.
+- **Background coordination**. Dispatch through MCP, follow the workers from the Pi Swarm panel, and let board events wake the original conversation when it has work to do.
 - **Named workers and shared messages**. Workers can hand off tasks with `@mentions`. Each worker keeps its session and working directory for follow-ups. Select a worker's Subagent card in the Pi Swarm panel to inspect its brief, latest task status and elapsed time, tool calls, model, worktree, and log path when available.
 - **Git worktree isolation**. Give parallel writers separate worktrees and `swarm-pi/*` branches. Review the changes and clean up the worktrees when finished.
 - **Per-role settings**. Configure model, reasoning, and timeout for roles such as coder, verifier, and researcher. Pi exposes a tool allowlist. Codex exposes a sandbox setting.
-- **Prebuilt plugin**. The repository and release archives include the MCP server, panel, and native subagent definition. Antigravity starts the server directly with Node.js.
+- **Prebuilt plugin**. The repository and release archives include the MCP server, panel, and coordinator sidecar. Antigravity starts the server directly with Node.js.
 
 ## Prerequisites
 
@@ -87,21 +87,15 @@ Reload the plugin in Antigravity when you are ready to switch versions. Reloadin
 
 If the panel reports that data is inside the plugin directory, finish all tasks and exit Antigravity. Copy the data directory (usually `.data`) to a location outside the plugin directory and verify the backup. Run the installer with the original installation target, then copy the data back to its original path before opening Antigravity. The manual installer replaces the target directory.
 
-### Native Antigravity Subagent Mode (recommended)
+### Event-driven follow-up
 
-By default, `/swarm_pi` registers a native monitor through `define_subagent` with `EnableMCPTools: true`. The coordinator posts each assignment once and passes its message number to a monitor started with `invoke_subagent`. Antigravity shows the monitor in its native **Subagents** list and wakes the coordinator on completion. The monitor reads the board through `swarm-pi_pi` under the existing host permissions. If native registration, startup, or MCP access fails, the coordinator follows the same board in Direct MCP Board Mode and keeps the existing assignments. [Antigravity custom subagents](https://antigravity.google/docs/subagents/#subagent-lifecycle-and-states)
-
-### Direct MCP Board Mode (fallback)
-
-Ask for Direct MCP Board Mode in your `/swarm_pi` request when you want zero host-wrapper turns. The coordinator dispatches and reads the board through `swarm-pi_pi` directly. The Pi Swarm side panel shows native-style Subagent cards and a per-worker inspector in both modes.
-
-Enable the bundled coordinator sidecar in Antigravity's `~/.gemini/config/config.json` to use event-driven follow-up. Merge this entry into the existing configuration and reload Antigravity before starting a new swarm.
+The coordinator dispatches through `swarm-pi_pi` and ends its turn. The board subscribes the owning conversation at creation. Enable the bundled coordinator sidecar in Antigravity's `~/.gemini/config/config.json` and reload Antigravity to receive follow-ups.
 
 ```json
 {"sidecars": {"swarm-pi/coordinator": {"enabled": true}}}
 ```
 
-The coordinator subscribes with `pi_swarm_watch`, dispatches work, and ends the turn. An addressed message, worker error, or completion of all queued work wakes the original conversation. If a native wrapper fails, the coordinator can subscribe to its existing board and dispatch only the missing assignments. [Antigravity Sidecars](https://antigravity.google/docs/sidecars/#agentapi)
+A message addressed to the coordinator, a worker error, or completion of queued work wakes the original conversation. It reads the available messages and finishes its turn again if work is still underway. Updates are always available in the Pi Swarm panel, including when automatic wake is unavailable. [Antigravity Sidecars](https://antigravity.google/docs/sidecars/#agentapi)
 
 ## Develop and package
 

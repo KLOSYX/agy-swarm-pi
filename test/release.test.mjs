@@ -10,19 +10,19 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const skillPath = 'skills/swarm_pi/SKILL.md';
 const workerPath = 'skills/swarm_pi/native-worker.md';
 
-test('native Swarm defines an MCP-enabled monitor for an existing assignment', async () => {
+test('the Swarm skill dispatches once and follows available events without a model monitor', async () => {
   const skill = await fs.readFile(path.join(root, skillPath), 'utf8');
-  const worker = await fs.readFile(path.join(root, workerPath), 'utf8');
-  assert.match(skill, /`define_subagent`[\s\S]+?EnableMCPTools: true[\s\S]+?EnableWriteTools: false[\s\S]+?`invoke_subagent`/);
+  assert.doesNotMatch(skill, /define_subagent|invoke_subagent|flash_lite/);
   assert.match(skill, /postedMessageNumber/);
-  assert.match(skill, /pi_swarm_watch/);
-  assert.match(worker, /call_mcp_tool/);
-  assert.match(worker, /pi_swarm_read/);
-  assert.match(worker, /replyTo/);
-  assert.match(worker, /response's `lastMessage`/);
-  assert.doesNotMatch(worker, /pi_submit_task/);
+  assert.match(skill, /pi_swarm_read.*waitMs: 0/);
+  assert.match(skill, /replyTo/);
+  const manifest = JSON.parse(await fs.readFile(path.join(root, 'hooks.json'), 'utf8'));
+  const hook = manifest['swarm-pi-coordinator'];
+  assert.ok(hook.PreInvocation.some(({ command }) => command.endsWith(' busy')));
+  assert.ok(hook.Stop.some(({ command }) => command.endsWith(' idle')));
+  assert.equal(hook.PostInvocation, undefined);
 });
-test('the release archives and installer retain the native worker prompt and bundled panel', async (t) => {
+test('the release archives and installer include the sidecar and bundled panel', async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'swarm-release-test-'));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   const fixture = path.join(dir, 'source');
@@ -57,12 +57,15 @@ test('the release archives and installer retain the native worker prompt and bun
   }
 
   for (const entry of [
-    skillPath, workerPath, 'ui/dist/settings.html', 'hooks.json', 'bin/coordinator-files.mjs', 'bin/coordinator-hook.mjs',
+    skillPath, 'ui/dist/settings.html', 'hooks.json', 'bin/coordinator-files.mjs', 'bin/coordinator-hook.mjs',
     'bin/host-binding.mjs', 'sidecars/coordinator/sidecar.json', 'sidecars/coordinator/main.mjs',
   ]) {
     const expected = await fs.readFile(path.join(root, entry));
     for (const pluginDir of pluginDirs) {
       assert.deepEqual(await fs.readFile(path.join(pluginDir, entry)), expected);
     }
+  }
+  for (const pluginDir of pluginDirs) {
+    await assert.rejects(fs.access(path.join(pluginDir, workerPath)), { code: 'ENOENT' });
   }
 });

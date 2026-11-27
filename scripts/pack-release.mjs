@@ -24,7 +24,6 @@ const INCLUDE_PATHS = [
   'sidecars/coordinator/sidecar.json',
   'sidecars/coordinator/main.mjs',
   'skills/swarm_pi/SKILL.md',
-  'skills/swarm_pi/native-worker.md',
   'ui/dist/settings.html',
 ];
 

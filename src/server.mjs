@@ -422,7 +422,7 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath, pluginRoot = PLUGIN_R
       timeoutSec: z.number().int().min(10).max(7200).optional(),
     })).min(1).max(12),
   }, (args) => boards.create(args));
-  boardTool('pi_swarm_watch', 'Arm Direct MCP coordinator wakes on this existing board. The owner can finish the turn when coordinatorWakeReady is true.', {
+  boardTool('pi_swarm_watch', 'Check coordinator wake readiness and queue any missed notification on an existing owned board. New owned boards subscribe automatically.', {
     ...readBoardShape, hostBinding,
   }, ({ boardId, after, hostBinding }) => boards.watch(boardId, after, hostBinding));
   boardTool('pi_swarm_post', 'Post as the coordinator and wake or queue the named worker. Returns the exact postedMessageNumber for matching replies.', postShape,

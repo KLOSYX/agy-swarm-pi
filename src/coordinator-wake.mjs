@@ -35,7 +35,7 @@ export class CoordinatorWake {
   }
 
   publish(board, number) {
-    if (!board.watching || number <= board.wakeCursor) return;
+    if (number <= board.wakeCursor) return;
     fs.mkdirSync(this.pending, { recursive: true, mode: 0o700 });
     writeJsonAtomic(path.join(this.pending, `${board.id}.json`), {
       boardId: board.id, coordinator: board.coordinator, ownerPid: process.pid, number,

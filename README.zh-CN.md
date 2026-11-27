@@ -8,10 +8,10 @@
 
 ## 特性
 
-- **Antigravity 原生子代理**。轻量转发代理通过 `swarm-pi_pi` 跟踪已派发的任务，在 Antigravity 原生 Subagents 界面中可见，任务结束后自动唤醒协调器。实际工作由 Pi 或 Codex 执行。
+- **后台协调**。通过 MCP 派工，使用 Pi Swarm 面板查看成员进度。看板出现需要跟进的事件时，自动唤醒原会话。
 - **Git Worktree 隔离**。`pi_submit_task(..., worktree: true)` 为并发写入创建独立 worktree 和 `swarm-pi/*` 分支。任务完成后可查看变更并清理工作树。
 - **共享消息板和角色设置**。在 Pi Swarm 面板选择成员的 Subagent 卡片，可查看该成员的职责说明，以及最近任务的状态、耗时、工具调用、模型、工作树和日志路径等可用信息。可为 `coder`、`verifier`、`researcher` 等角色配置模型、推理档位和超时。Pi 可配置工具白名单，Codex 可配置沙箱。
-- **预构建安装包**。仓库和 Release 包包含 MCP 服务、面板与原生监控子 Agent 的提示词。Antigravity 直接通过 Node.js 启动服务。
+- **预构建安装包**。仓库和 Release 包包含 MCP 服务、面板与协调器 Sidecar。Antigravity 直接通过 Node.js 启动服务。
 
 ---
 
@@ -91,21 +91,15 @@ agy plugin install ./agy-swarm-pi
 
 如果面板提示数据位于插件目录内，请先完成所有任务并退出 Antigravity，将数据目录（通常为 `.data`）复制到插件目录之外并确认备份可读。以原安装目录为目标运行安装脚本，再把数据复制回原路径，然后打开 Antigravity。手动安装脚本会替换目标目录。
 
-### Antigravity 原生子代理模式（推荐）
+### 按事件自动跟进
 
-`/swarm_pi` 默认通过 `define_subagent` 注册原生监控子 Agent，并显式设置 `EnableMCPTools: true`。协调器只发布一次任务，把消息编号交给 `invoke_subagent` 启动的监控子 Agent。Antigravity 在原生 **Subagents** 列表显示监控会话，并在它报告结果时唤醒协调器。监控子 Agent 在宿主现有权限下通过 `swarm-pi_pi` 读取看板。如果原生定义、启动或 MCP 访问失败，协调器切换到 Direct MCP，沿用原看板及已发布的任务。[Antigravity 原生子代理文档](https://antigravity.google/docs/subagents/#subagent-lifecycle-and-states)
-
-### MCP 直连消息板模式（备用）
-
-如果希望省去宿主转发代理的轮次，可以在 `/swarm_pi` 请求中指定 MCP 直连消息板模式。协调器直接通过 `swarm-pi_pi` 派发和读取消息。两种模式都可以在 Pi Swarm 侧边面板查看原生风格的 Subagent 卡片和成员详情。
-
-如需按事件自动跟进，在 Antigravity 的 `~/.gemini/config/config.json` 中合并以下配置，并在启动新蜂群前重新加载 Antigravity。
+协调器通过 `swarm-pi_pi` 派工后结束当前回合。开板时默认订阅创建该看板的会话。在 Antigravity 的 `~/.gemini/config/config.json` 中合并以下配置并重载 Antigravity，即可接收自动唤醒。
 
 ```json
 {"sidecars": {"swarm-pi/coordinator": {"enabled": true}}}
 ```
 
-协调器通过 `pi_swarm_watch` 订阅原看板，派工后结束当前回合。发给协调器的消息、成员报错或队列全部执行完毕时，Sidecar 会唤醒原会话。原生转发代理失败时，可在同一看板开启订阅，只补发缺失的任务。[Antigravity Sidecar 文档](https://antigravity.google/docs/sidecars/#agentapi)
+发给协调器的消息、成员报错或队列执行完毕会唤醒原会话。协调器读取当前已有消息，任务仍在运行时再次结束回合。自动唤醒不可用时，仍可在 Pi Swarm 面板查看进度和追加指令。[Antigravity Sidecar 文档](https://antigravity.google/docs/sidecars/#agentapi)
 
 ---
 
