@@ -1,7 +1,7 @@
 {
   "name": "swarm-pi",
   "displayName": "Swarm Pi",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Run parallel coding tasks from Antigravity (/swarm_pi) with your selected Pi or Codex harness, Git worktree isolation, per-role model settings, and a shared message board.",
   "homepage": "https://github.com/KLOSYX/agy-swarm-pi",
   "repository": "https://github.com/KLOSYX/agy-swarm-pi",
