@@ -221,8 +221,6 @@ export class SwarmBoards {
             const [, to, text] = route;
             if (to === member.name || (to !== 'coordinator' && !board.roster.has(to))) {
               feedback.push(`Invalid handoff to @${to}`);
-            } else if (text.length > 4000) {
-              feedback.push(`Handoff to @${to} exceeds 4000 characters`);
             } else if (to !== 'coordinator' && budget.remaining === 0) {
               feedback.push(`Automatic handoff limit reached for @${to}`);
             } else {
@@ -232,7 +230,7 @@ export class SwarmBoards {
           }
           const details = { taskId: task.task_id, replyTo: entry.number };
           this.append(board, {
-            from: member.name, kind: 'result', text: summary.join('\n').trim().slice(0, 4000),
+            from: member.name, kind: 'result', text: summary.join('\n').trim(),
             actualModel: result.actual_model, ...details,
           });
           for (const text of feedback) this.append(board, { from: member.name, kind: 'error', text, ...details });

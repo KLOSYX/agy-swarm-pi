@@ -16,12 +16,16 @@ test('MCP board routes peer and user messages to the same worker session and wor
   const taskWorktree = path.join(cwd, 'coder-worktree');
   let finishFirstTurn;
   const firstTurn = new Promise((resolve) => { finishFirstTurn = resolve; });
+  const assignment = `Start\n${'设计约束 '.repeat(1000)}\nEnd of assignment`;
+  const handoff = `Please review ${'检查 '.repeat(1500)}end of handoff`;
+  const userInstruction = `Follow-up from the panel\n${'追加要求 '.repeat(1000)}\nEnd of follow-up`;
+  const userFollowUpResult = `User follow-up completed\n${'验证结果 '.repeat(1000)}\nEnd of result`;
   const replies = [
-    'SWARM_POST @verifier Please review',
+    `SWARM_POST @verifier ${handoff}`,
     'SWARM_POST @coder Fix the lower bound',
     'SWARM_POST @verifier Please recheck',
     'SWARM_POST @coordinator PASS',
-    'User follow-up completed',
+    userFollowUpResult,
   ];
   taskManager.submit = async (args) => {
     turns.push(args);
@@ -73,8 +77,10 @@ test('MCP board routes peer and user messages to the same worker session and wor
   assert.deepEqual(members.map(({ brief }) => brief), ['Fix the lower bound', '']);
   assert.ok(members.every((member) => !Object.hasOwn(member, 'latestTask')));
   assert.equal((await call('pi_swarm_post', { boardId, to: 'missing', text: 'Bad recipient' })).isError, true);
-  const posted = await success('pi_swarm_post', { boardId, to: 'coder', text: 'Start' });
+  const posted = await success('pi_swarm_post', { boardId, to: 'coder', text: assignment });
   assert.equal(posted.postedMessageNumber, 1);
+  assert.equal(posted.messages[0].text, assignment);
+  assert.ok(turns[0].prompt.endsWith(assignment));
   const active = (await success('app_read_board', { boardId })).members[0];
   assert.equal(active.status, 'working');
   assert.equal(active.latestTask.status, 'running');
@@ -94,6 +100,8 @@ test('MCP board routes peer and user messages to the same worker session and wor
   assert.equal(turns[2].cwd, taskWorktree);
   assert.equal(turns[2].worktree, false);
   assert.ok(turns[1].prompt.includes(taskWorktree));
+  assert.ok(turns[1].prompt.endsWith(handoff));
+  assert.equal(final.messages.find(({ from, to }) => from === 'coder' && to === 'verifier').text, handoff);
   const [coder, verifier] = final.members;
   assert.equal(coder.taskId, '3');
   assert.equal(coder.worktreeTaskId, '1');
@@ -119,14 +127,17 @@ test('MCP board routes peer and user messages to the same worker session and wor
   ]);
 
   const waiting = success('pi_swarm_read', { boardId, after: final.lastMessage, waitMs: 1000 });
-  await success('app_post_board', { boardId, to: 'coder', text: 'Follow-up from the panel' });
+  assert.equal((await call('app_post_board', { boardId, to: 'coder', text: ' \n ' })).isError, true);
+  await success('app_post_board', { boardId, to: 'coder', text: userInstruction });
   assert.equal((await waiting).messages[0].from, 'user');
   const followUp = await success('app_read_board', { boardId, after: final.lastMessage });
-  assert.equal(followUp.messages[1].text, 'User follow-up completed');
+  assert.equal(followUp.messages[0].text, userInstruction);
+  assert.equal(followUp.messages[1].text, userFollowUpResult);
   assert.equal(followUp.members[0].latestTask.taskId, '5');
   assert.equal(followUp.members[0].latestTask.logPath, path.join(taskWorktree, '5.log'));
   assert.equal(turns[4].sessionKey, turns[0].sessionKey);
   assert.equal(turns[4].cwd, taskWorktree);
+  assert.ok(turns[4].prompt.endsWith(userInstruction));
 
   assert.ok(taskManager.worktreeLeases.has('1'));
   await success('pi_swarm_close', { boardId });

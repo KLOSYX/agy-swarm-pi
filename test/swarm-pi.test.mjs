@@ -50,7 +50,7 @@ const getArg = (flag) => {
   return idx >= 0 ? args[idx + 1] : null;
 };
 
-const prompt = getArg('-p') || '';
+const prompt = fs.readFileSync(0, 'utf8');
 const sessionDir = getArg('--session-dir');
 const hadContinue = args.includes('--continue');
 const model = getArg('--model') || '(default)';
@@ -85,7 +85,6 @@ if (prompt.includes('SETTLED_WITH_OPEN_HANDLE')) {
       }]
     }
   }));
-  process.exit(0);
 }
 `;
   await fs.writeFile(binPath, script, { encoding: 'utf8', mode: 0o755 });
@@ -231,7 +230,6 @@ test('Codex uses stdin and parses completion, usage, and terminal errors', () =>
 
 test('buildPiArgs, parsePiJsonOutput, and parseListModelsOutput handle edge cases', () => {
   const args = buildPiArgs({
-    prompt: 'Fix bug',
     model: 'anthropic/claude-sonnet-4-5',
     thinking: 'high',
     tools: 'read,edit',
@@ -251,7 +249,6 @@ test('buildPiArgs, parsePiJsonOutput, and parseListModelsOutput handle edge case
     '--tools',
     'read,edit',
     '-p',
-    'Fix bug',
   ]);
 
   const parsed = parsePiJsonOutput(
@@ -348,14 +345,17 @@ test('PiTaskManager supports batch waitTasks, sessions, worktree isolation, clea
     assert.equal(cleaned.branch_deleted, true);
 
     // Session continuation check
+    const followUp = `Turn 2\n${'多语言任务 '.repeat(30000)}\nEnd of instructions`;
     const t3 = await manager.submit({
-      prompt: 'Turn 2',
+      prompt: followUp,
       cwd: repoDir,
       role: 'verifier',
       sessionKey: 'worker-1',
     });
     const p3 = await manager.poll(t3.task_id, { waitMs: 5000 });
-    assert.equal(JSON.parse(p3.result_text).hadContinue, true);
+    const resumedTurn = JSON.parse(p3.result_text);
+    assert.equal(resumedTurn.hadContinue, true);
+    assert.equal(resumedTurn.prompt, followUp);
 
     const settledTask = await manager.submit({
       prompt: 'SETTLED_WITH_OPEN_HANDLE', cwd: repoDir, finishOnSettled: true,

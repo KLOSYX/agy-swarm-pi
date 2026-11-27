@@ -35,7 +35,7 @@ const boardId = z.string().uuid();
 const hostBinding = z.object({ conversationId: z.string().uuid(), proof: z.string().uuid() })
   .optional().describe('Injected by the Antigravity hook. Omit when calling this tool.');
 const postShape = {
-  boardId, to: memberName, text: z.string().trim().min(1).max(4000),
+  boardId, to: memberName, text: z.string().trim().min(1),
 };
 
 function parseCliArgs(argv) {

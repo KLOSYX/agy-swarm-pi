@@ -137,7 +137,6 @@ async function dirHasSessionFiles(sessionDir) {
 }
 
 export function buildPiArgs({
-  prompt,
   model,
   thinking,
   tools,
@@ -167,7 +166,7 @@ export function buildPiArgs({
     args.push('--tools', tools);
   }
 
-  args.push('-p', prompt);
+  args.push('-p');
   return args;
 }
 
@@ -584,7 +583,6 @@ export class PiTaskManager {
     const codexSession = codex ? await readCodexSession(this.dataDir, runCwd, sessionKey) : null;
     const outputPath = codex ? `${logPath}.reply` : null;
     const args = codex ? buildCodexArgs({ ...profile, ...codexSession, outputPath }) : buildPiArgs({
-      prompt: String(prompt),
       model: profile.model,
       thinking: profile.thinking,
       tools: profile.tools,
@@ -598,7 +596,7 @@ export class PiTaskManager {
 
     const child = spawnWorker(executable, args, {
       cwd: runCwd,
-      stdio: [codex ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
       env: process.env,
     });
 
@@ -747,10 +745,8 @@ export class PiTaskManager {
     child.on('close', (code) => {
       finalize(code ?? (settled ? null : -1));
     });
-    if (codex) {
-      child.stdin.on('error', () => {}); // Early CLI failures are reported on stderr/close.
-      child.stdin.end(String(prompt), 'utf8');
-    }
+    child.stdin.on('error', () => {}); // Early CLI failures are reported on stderr/close.
+    child.stdin.end(String(prompt), 'utf8');
 
     this.tasks.set(taskId, task);
 

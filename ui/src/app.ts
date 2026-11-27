@@ -547,7 +547,7 @@ function renderComposer(current: Board): string {
     <div class="composer-header"><label for="board-recipient">${labels.recipient}</label>
       <select id="board-recipient">${recipientOptions(current)}</select></div>
     <label class="sr-only" for="board-instruction">${labels.instruction}</label>
-    <textarea id="board-instruction" required maxlength="4000" rows="3"></textarea>
+    <textarea id="board-instruction" required rows="3"></textarea>
     <div class="composer-actions"><span class="hint shortcut">${labels.submitShortcut(shortcut)}</span>
       <button class="btn primary" type="submit" ${savingLanguage || composing ? 'disabled' : ''}>${icon('send')}${labels.sendInstruction}</button></div>
     <output id="board-post-status" aria-live="polite"></output>
