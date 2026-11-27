@@ -76,10 +76,13 @@ test('MCP board routes peer and user messages to the same worker session and wor
   });
   assert.deepEqual(members.map(({ brief }) => brief), ['Fix the lower bound', '']);
   assert.ok(members.every((member) => !Object.hasOwn(member, 'latestTask')));
-  assert.equal((await call('pi_swarm_post', { boardId, to: 'missing', text: 'Bad recipient' })).isError, true);
-  const posted = await success('pi_swarm_post', { boardId, to: 'coder', text: assignment });
-  assert.equal(posted.postedMessageNumber, 1);
-  assert.equal(posted.messages[0].text, assignment);
+  assert.equal((await call('pi_swarm_post', { boardId, to: 'missing', assignmentKey: 'missing', text: 'Bad recipient' })).isError, true);
+  const posted = await success('pi_swarm_post', {
+    boardId, to: 'coder', assignmentKey: 'initial-coder', text: assignment,
+  });
+  assert.deepEqual(posted, { postedMessageNumber: 1 });
+  const original = await success('pi_swarm_read', { boardId, messageNumber: posted.postedMessageNumber });
+  assert.equal(original.text, assignment);
   assert.ok(turns[0].prompt.endsWith(assignment));
   const active = (await success('app_read_board', { boardId })).members[0];
   assert.equal(active.status, 'working');
@@ -244,7 +247,7 @@ test('concurrent identical posts identify their own replies beyond the first boa
   const posts = await Promise.all([post(), post()]);
   const [first, second] = posts.sort((a, b) => a.postedMessageNumber - b.postedMessageNumber);
   assert.deepEqual([first.postedMessageNumber, second.postedMessageNumber], [51, 52]);
-  assert.equal(second.messages.at(-1).number, 50);
+  assert.deepEqual(second, { postedMessageNumber: 52 });
   assert.equal(taskCount, 1);
   finishFirstTask();
   await setImmediate();

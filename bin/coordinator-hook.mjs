@@ -2,13 +2,13 @@ import { readFileSync } from 'node:fs';
 import { appDataFromHook, updateBinding } from './host-binding.mjs';
 
 const SERVER = 'swarm-pi_pi';
-const boundTools = new Set(['pi_create_swarm', 'pi_swarm_watch']);
+const boundTools = new Set(['pi_create_swarm', 'pi_swarm_watch', 'pi_swarm_inbox', 'pi_swarm_post']);
 const phase = process.argv[2];
 
 function bindBoard(input, appData) {
   const call = input.toolCall;
   if (!call?.name || !call.args) return null;
-  if (/^mcp_+swarm[-_]pi_pi_+pi_(?:create_swarm|swarm_watch)$/.test(call.name)) {
+  if (/^mcp_+swarm[-_]pi_pi_+pi_(?:create_swarm|swarm_watch|swarm_inbox|swarm_post)$/.test(call.name)) {
     return { hostBinding: updateBinding(appData, input.conversationId, false, true) };
   }
   if (call.name !== 'call_mcp_tool') return null;

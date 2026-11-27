@@ -14,7 +14,8 @@ test('the Swarm skill dispatches once and follows available events without a mod
   const skill = await fs.readFile(path.join(root, skillPath), 'utf8');
   assert.doesNotMatch(skill, /define_subagent|invoke_subagent|flash_lite/);
   assert.match(skill, /postedMessageNumber/);
-  assert.match(skill, /pi_swarm_read.*waitMs: 0/);
+  assert.match(skill, /pi_swarm_inbox.*ackThrough/);
+  assert.match(skill, /assignmentKey/);
   assert.match(skill, /replyTo/);
   const manifest = JSON.parse(await fs.readFile(path.join(root, 'hooks.json'), 'utf8'));
   const hook = manifest['swarm-pi-coordinator'];

@@ -7,6 +7,7 @@ import { BOARD_ID, processIsAlive, writeJsonAtomic } from '../../bin/coordinator
 import { getBinding } from '../../bin/host-binding.mjs';
 
 const run = promisify(execFile);
+const WAKE_RETRY_MS = 15000;
 const runtimeDir = process.env.ANTIGRAVITY_EXECUTABLE_DATA_DIR;
 if (!runtimeDir) throw new Error('Pi Swarm wake sidecar requires ANTIGRAVITY_EXECUTABLE_DATA_DIR');
 let appData = path.resolve(runtimeDir);
@@ -16,7 +17,8 @@ while (path.basename(appData) !== 'sidecar_data') {
   appData = parent;
 }
 appData = path.dirname(appData);
-const directory = path.join(appData, 'plugin_data', 'swarm-pi', 'direct-wake');
+const pluginData = path.join(appData, 'plugin_data', 'swarm-pi');
+const directory = path.join(pluginData, 'direct-wake');
 const pendingDir = path.join(directory, 'pending');
 const dispatchDir = path.join(directory, 'dispatch');
 for (const dir of [pendingDir, dispatchDir]) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -36,28 +38,35 @@ async function wake(filename, attempted) {
   if (!record) return;
   const { boardId, coordinator, ownerPid, number } = record;
   const cursorPath = path.join(dispatchDir, `${boardId}.json`);
-  if (!processIsAlive(ownerPid)) {
-    fs.rmSync(filename, { force: true });
-    fs.rmSync(cursorPath, { force: true });
-    return;
-  }
+  if (!processIsAlive(ownerPid)) return;
   const conversationId = coordinator.conversationId;
   if (attempted.has(conversationId)) return;
   const bindingPath = getBinding(appData, conversationId);
   const binding = bindingPath && read(bindingPath);
   if (!binding?.idle || binding.proof !== coordinator.proof) return;
-  const cursor = read(cursorPath);
-  if ((cursor?.sent ?? 0) >= number || Date.now() - (cursor?.attemptedAt ?? 0) < 15000) return;
+  const storedCursor = read(cursorPath);
+  const cursor = storedCursor?.ownerPid === ownerPid ? storedCursor : null;
+  const now = Date.now();
+  if (now - (cursor?.attemptedAt ?? 0) < WAKE_RETRY_MS) return;
+  // The host accepted the previous wake. A later idle transition without an
+  // acknowledgement makes the same page eligible for one more notification.
+  const retry = (cursor?.sent ?? 0) >= number;
+  if (retry && (
+    cursor.retried || binding.updatedAt <= cursor.bindingUpdatedAt || now - cursor.sentAt < WAKE_RETRY_MS
+  )) return;
+  const saved = read(path.join(pluginData, 'boards', `${boardId}.json`));
+  if (saved?.closed || (saved?.handledThrough ?? 0) >= number) return;
   const conversationPath = path.join(dispatchDir, `conversation-${conversationId}.json`);
   const previous = read(conversationPath);
-  if (previous && binding.updatedAt <= previous.bindingUpdatedAt && Date.now() - previous.at < 15000) return;
+  if (previous && binding.updatedAt <= previous.bindingUpdatedAt && now - previous.at < WAKE_RETRY_MS) return;
   attempted.add(conversationId);
-  const now = Date.now();
-  writeJsonAtomic(cursorPath, { sent: cursor?.sent ?? 0, attemptedAt: now });
+  writeJsonAtomic(cursorPath, { ...cursor, ownerPid, sent: cursor?.sent ?? 0, attemptedAt: now });
   writeJsonAtomic(conversationPath, { at: now, bindingUpdatedAt: binding.updatedAt });
-  const prompt = `Pi Swarm coordinator wake. Board ID: ${boardId}, new posts through #${number}. Read the existing board with swarm-pi_pi pi_swarm_read (waitMs=0), starting after the last handled post. Read additional available pages if needed. Handle actionable reports once and finish the turn to await further events.`;
+  const prompt = `Pi Swarm coordinator wake. Board ID: ${boardId}, new posts through #${number}. Use pi_swarm_inbox for this board. Process each page and acknowledge its pageThrough. Finish the turn after handling the available work.`;
   await run('agentapi', ['send-message', conversationId, prompt], { timeout: 12000 });
-  writeJsonAtomic(cursorPath, { sent: number, attemptedAt: 0 });
+  writeJsonAtomic(cursorPath, {
+    ownerPid, sent: number, attemptedAt: 0, sentAt: now, bindingUpdatedAt: binding.updatedAt, retried: retry,
+  });
   console.log(`Pi Swarm coordinator wake delivered for board ${boardId} post #${number}`);
 }
 

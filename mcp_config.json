@@ -17,6 +17,9 @@
         "open_pi_swarm_settings": {
           "eager": true
         },
+        "pi_swarm_inbox": {
+          "eager": true
+        },
         "pi_swarm_post": {
           "eager": true
         }

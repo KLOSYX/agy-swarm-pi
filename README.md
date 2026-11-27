@@ -33,11 +33,11 @@ codex login
 
 ### From a GitHub release
 
-Download the version you want from [GitHub Releases](https://github.com/KLOSYX/agy-swarm-pi/releases). This example installs v0.4.4.
+Download the version you want from [GitHub Releases](https://github.com/KLOSYX/agy-swarm-pi/releases). This example installs v0.5.0.
 
 ```bash
-curl -fsSLO https://github.com/KLOSYX/agy-swarm-pi/releases/download/v0.4.4/swarm-pi-v0.4.4.tar.gz
-tar -xzf swarm-pi-v0.4.4.tar.gz
+curl -fsSLO https://github.com/KLOSYX/agy-swarm-pi/releases/download/v0.5.0/swarm-pi-v0.5.0.tar.gz
+tar -xzf swarm-pi-v0.5.0.tar.gz
 ./swarm-pi/install.sh
 ```
 
@@ -75,15 +75,15 @@ To remove a global installation, run the installed script with `--uninstall`.
 3. Run `/swarm_pi <your task>` in the main conversation. The coordinator creates the board, names the workers, and assigns tasks.
 4. Open **Shared message board** to follow the conversation. To send a follow-up, select a worker, enter your instructions, and send them. An idle worker resumes its session immediately. A busy worker processes queued messages in order.
 
-Workers hand off work by including `SWARM_POST @worker message` in their final reply. The MCP server routes the message after the turn finishes. Finish or cancel active tasks before switching harnesses. Existing boards stay readable and become available for posting again when their original harness is selected.
+Workers hand off work by including `SWARM_POST @worker message` in their final reply. The MCP server routes the message after the turn finishes. Repeated handoffs and chains that reach the safety limit are paused with the pending message available to the coordinator. Finish or cancel active tasks before switching harnesses. Existing boards stay readable and become available for posting again when their original harness is selected.
 
-Boards and queues live in the MCP process. The plugin data directory contains task logs, Pi sessions, and Codex session IDs. Codex stores its session transcripts in its own CLI data directory. Codex's JSONL output does not report the actual model, so the panel shows the configured model separately.
+The plugin data directory stores board history, coordinator cursors, assignment keys, task logs, Pi sessions, and Codex session IDs. Restarting the MCP server restores boards and marks unconfirmed assignments as interrupted so they can be reviewed before any follow-up. Codex stores its session transcripts in its own CLI data directory. Codex's JSONL output does not report the actual model, so the panel shows the configured model separately.
 
 ### Update from the panel
 
 In **Settings → Plugin updates**, select **Check for updates** to compare the running plugin with the latest stable GitHub release. For an eligible release installation, select **Install update** and confirm. The updater verifies the archive against its SHA-256 file and keeps a backup of the previous plugin directory. Running and queued work blocks installation.
 
-Reload the plugin in Antigravity when you are ready to switch versions. Reloading clears open boards. Settings and session data stored outside the plugin directory are kept. For a Git checkout, use Git to update it. For a linked plugin directory, update the source directory.
+Reload the plugin in Antigravity when you are ready to switch versions. Reloading restores boards saved by versions with board persistence. Boards created before persistence were held in the old process. Settings and session data stored outside the plugin directory are kept. For a Git checkout, use Git to update it. For a linked plugin directory, update the source directory.
 
 If the panel reports that data is inside the plugin directory, finish all tasks and exit Antigravity. Copy the data directory (usually `.data`) to a location outside the plugin directory and verify the backup. Run the installer with the original installation target, then copy the data back to its original path before opening Antigravity. The manual installer replaces the target directory.
 
@@ -95,7 +95,7 @@ The coordinator dispatches through `swarm-pi_pi` and ends its turn. The board su
 {"sidecars": {"swarm-pi/coordinator": {"enabled": true}}}
 ```
 
-A message addressed to the coordinator, a worker error, or completion of queued work wakes the original conversation. It reads the available messages and finishes its turn again if work is still underway. Updates are always available in the Pi Swarm panel, including when automatic wake is unavailable. [Antigravity Sidecars](https://antigravity.google/docs/sidecars/#agentapi)
+A message addressed to the coordinator, a worker error, or completion of queued work wakes the original conversation. The coordinator reads its actionable inbox, acknowledges processed pages, and can look up any full post by message number. A retried assignment with the same key and arguments returns the original receipt. Updates are always available in the Pi Swarm panel, including when automatic wake is unavailable. [Antigravity Sidecars](https://antigravity.google/docs/sidecars/#agentapi)
 
 ## Develop and package
 

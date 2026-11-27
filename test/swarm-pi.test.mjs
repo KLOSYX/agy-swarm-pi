@@ -183,7 +183,7 @@ test('only the panel selects a harness, active work blocks switches, and old boa
         await taskManager.cancel(active.task_id);
       }
       assert.equal((await setCodex()).structuredContent.settings.harness, 'codex');
-      const refused = await call('pi_swarm_post', { boardId: piBoard.id, to: 'worker', text: 'Continue' });
+      const refused = await call('pi_swarm_post', { boardId: piBoard.id, to: 'worker', assignmentKey: 'continue', text: 'Continue' });
       assert.equal(refused.isError, true);
       assert.match(refused.content[0].text, /This swarm uses pi/);
       assert.equal((await call('pi_create_swarm', boardArgs)).structuredContent.harness, 'codex');
@@ -493,7 +493,7 @@ test('the plugin manifest starts the bundled MCP panel directly with Node', asyn
       await client.connect(transport);
       const tools = (await client.listTools()).tools;
       const eager = Object.entries(config.tools ?? {}).filter(([, tool]) => tool.eager).map(([name]) => name);
-      assert.deepEqual(eager.sort(), ['open_pi_swarm_settings', 'pi_create_swarm', 'pi_get_settings', 'pi_swarm_post']);
+      assert.deepEqual(eager.sort(), ['open_pi_swarm_settings', 'pi_create_swarm', 'pi_get_settings', 'pi_swarm_inbox', 'pi_swarm_post']);
       assert.ok(eager.every((name) => tools.some((tool) => tool.name === name)));
       const panel = tools.find(({ name }) => name === 'open_pi_swarm_settings');
       assert.ok(panel?._meta?.['com.google.antigravity/ui']?.entrypoints.some(({ type }) => type === 'aux_pane'));

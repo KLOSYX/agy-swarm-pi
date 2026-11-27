@@ -31,7 +31,7 @@ async function until(check, timeout = 5000) {
   assert.fail('Timed out waiting for the coordinator wake');
 }
 
-test('a late sidecar delivers queued work once after the owner stops', { skip: process.platform === 'win32' }, async (t) => {
+test('the sidecar delivers on idle and retries an unacknowledged wake', { skip: process.platform === 'win32' }, async (t) => {
   const appData = await mkdtemp(path.join(tmpdir(), 'swarm-direct-wake-'));
   const dataDir = path.join(appData, 'plugin_data', 'swarm-pi');
   const runtimeDir = path.join(appData, 'sidecar_data', 'swarm-pi', 'coordinator', 'data');
@@ -46,6 +46,15 @@ test('a late sidecar delivers queued work once after the owner stops', { skip: p
   const binding = runHook('tool', {
     name: 'mcp_swarm-pi_pi_pi_create_swarm', args: {},
   }).overwrite.hostBinding;
+  assert.deepEqual(runHook('tool', {
+    name: 'mcp_swarm-pi_pi_pi_swarm_post', args: { assignmentKey: 'stable-key' },
+  }).overwrite.hostBinding, binding);
+  const lazy = runHook('tool', {
+    name: 'call_mcp_tool', args: {
+      ServerName: 'swarm-pi_pi', ToolName: 'pi_swarm_inbox', Arguments: '{"ackThrough":4}',
+    },
+  });
+  assert.deepEqual(JSON.parse(lazy.overwrite.Arguments), { ackThrough: 4, hostBinding: binding });
 
   const capture = path.join(appData, 'capture.json');
   const failFirst = path.join(appData, 'attempted');
@@ -100,8 +109,8 @@ fs.appendFileSync(${JSON.stringify(capture)}, JSON.stringify(process.argv.slice(
   assert.match(denied.content[0].text, /owning Antigravity conversation/);
   runHook('busy');
 
-  await success('pi_swarm_post', { boardId: id, to: 'coder', text: 'Start first task' });
-  await success('pi_swarm_post', { boardId: id, to: 'verifier', text: 'Start second task' });
+  await success('pi_swarm_post', { boardId: id, to: 'coder', text: 'Start first task', assignmentKey: 'first', hostBinding: binding });
+  await success('pi_swarm_post', { boardId: id, to: 'verifier', text: 'Start second task', assignmentKey: 'second', hostBinding: binding });
   await until(() => finish.size === 2);
   finish.get('coder')(coderResult);
   await until(async () => (await success('pi_swarm_read', { boardId: id })).members[0].status === 'waiting');
@@ -130,11 +139,22 @@ fs.appendFileSync(${JSON.stringify(capture)}, JSON.stringify(process.argv.slice(
   const args = await until(() => readJson(capture));
   assert.deepEqual(args.slice(0, 2), ['send-message', conversationId]);
   assert.ok(args[2].includes(id) && args[2].includes('#4') && !args[2].includes('private'));
-  assert.match(args[2], /waitMs=0/);
+  assert.match(args[2], /pi_swarm_inbox.*pageThrough/);
   await until(async () => (await readJson(cursor))?.sent === 4);
   writeJsonAtomic(conversation, { ...(await readJson(conversation)), at: Date.now() - 16000 });
   await delay(1250);
-  assert.deepEqual(await readJson(capture), args, 'The acknowledged cursor must stay silent on later scans');
+  assert.deepEqual(await readJson(capture), args, 'One idle interval must not send another notification');
+  writeJsonAtomic(cursor, { ...(await readJson(cursor)), sentAt: Date.now() - 16000 });
+  runHook('idle');
+  const captures = async () => (await readFile(capture, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+  const retried = await until(async () => {
+    const lines = await captures();
+    return lines.length === 2 && lines;
+  });
+  assert.deepEqual(retried, [args, args], 'Transport delivery did not acknowledge the work');
+  const page = await success('pi_swarm_inbox', { boardId: id, hostBinding: binding });
+  await success('pi_swarm_inbox', { boardId: id, hostBinding: binding, ackThrough: page.pageThrough });
+  assert.equal(await readJson(pending), null);
   await success('pi_swarm_close', { boardId: id });
   assert.equal(await readJson(pending), null);
 });

@@ -372,7 +372,8 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath, pluginRoot = PLUGIN_R
     const config = { description, inputSchema };
     const call = async (args) => {
       try {
-        return jsonToolResult(await handler(args));
+        const payload = await handler(args);
+        return jsonToolResult(payload, appOnly ? null : JSON.stringify(payload));
       } catch (err) {
         return errorToolResult(err);
       }
@@ -425,19 +426,35 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath, pluginRoot = PLUGIN_R
   boardTool('pi_swarm_watch', 'Check coordinator wake readiness and queue any missed notification on an existing owned board. New owned boards subscribe automatically.', {
     ...readBoardShape, hostBinding,
   }, ({ boardId, after, hostBinding }) => boards.watch(boardId, after, hostBinding));
-  boardTool('pi_swarm_post', 'Post as the coordinator and wake or queue the named worker. Returns the exact postedMessageNumber for matching replies.', postShape,
-    ({ boardId, to, text }) => boards.post(boardId, 'coordinator', to, text));
-  boardTool('pi_swarm_read', 'Read member status, latest task telemetry, and up to 50 messages after the cursor. With member and waitMs, wait for that worker to finish, a message involving that worker, or board closure. Returns the full board page.', {
+  boardTool('pi_swarm_post', 'Assign work once. Retry the same assignmentKey and arguments to get the original postedMessageNumber.', {
+    ...postShape, hostBinding,
+    assignmentKey: z.string().regex(/^[a-zA-Z0-9_-]{1,120}$/)
+      .describe('Stable ID for this action, e.g. initial-coder or post-42-request-fix. Reuse it on retries.'),
+    replyTo: z.number().int().positive().optional().describe('Board message number this assignment answers.'),
+  }, ({ boardId, to, text, ...options }) => boards.post(boardId, 'coordinator', to, text, options));
+  boardTool('pi_swarm_inbox', 'Read the owning coordinator’s next actionable page from its saved cursor. Process it, then acknowledge its pageThrough in a separate call.', {
+    boardId, hostBinding,
+    ackThrough: z.number().int().nonnegative().optional()
+      .describe('Acknowledge a processed pageThrough. This call only saves the cursor. Omit to read.'),
+    limit: z.number().int().min(1).max(8).optional(),
+  }, ({ boardId, ...options }) => boards.inbox(boardId, options));
+  boardTool('pi_swarm_read', 'Read one full board post by messageNumber, or explicitly browse history and detailed member status. Use pi_swarm_inbox for coordinator follow-up.', {
     ...readBoardShape,
+    messageNumber: z.number().int().positive().optional(),
     waitMs: z.number().int().min(0).max(60000).optional(),
     member: memberName.optional(),
-  }, ({ boardId, after, waitMs, member }) => boards.waitForMessages(boardId, after, waitMs, { member }));
+  }, ({ boardId, after, messageNumber, waitMs, member }) => messageNumber === undefined
+    ? boards.waitForMessages(boardId, after, waitMs, { member })
+    : boards.message(boardId, messageNumber));
   boardTool('pi_swarm_close', 'Close an idle Pi Swarm and release its worktrees for cleanup.', { boardId },
     ({ boardId }) => boards.close(boardId));
   boardTool('app_read_board', 'List swarms or read messages and member task telemetry for a selected board.',
     { ...readBoardShape, boardId: boardId.optional() }, readAppBoard, true);
   boardTool('app_post_board', 'Post a user message and wake or queue the named Pi worker.', postShape,
-    ({ boardId, to, text }) => boards.post(boardId, 'user', to, text), true);
+    async ({ boardId, to, text }) => {
+      const receipt = await boards.post(boardId, 'user', to, text);
+      return { ...boards.read(boardId), ...receipt };
+    }, true);
 
   server.registerTool(
     'pi_get_settings',

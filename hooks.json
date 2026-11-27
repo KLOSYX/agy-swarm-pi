@@ -2,7 +2,7 @@
   "swarm-pi-coordinator": {
     "PreToolUse": [
       {
-        "matcher": "^(call_mcp_tool|mcp_+swarm[-_]pi_pi_+pi_(create_swarm|swarm_watch))$",
+        "matcher": "^(call_mcp_tool|mcp_+swarm[-_]pi_pi_+pi_(create_swarm|swarm_watch|swarm_inbox|swarm_post))$",
         "hooks": [{ "type": "command", "command": "node ./bin/coordinator-hook.mjs tool", "timeout": 5 }]
       }
     ],

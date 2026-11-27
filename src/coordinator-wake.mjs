@@ -43,7 +43,15 @@ export class CoordinatorWake {
     board.wakeCursor = number;
   }
 
+  acknowledge(board) {
+    if (board.wakeCursor && board.handledThrough >= board.wakeCursor) this.close(board);
+  }
+
   close(board) {
-    if (board.wakeCursor) fs.rmSync(path.join(this.pending, `${board.id}.json`), { force: true });
+    try {
+      fs.rmSync(path.join(this.pending, `${board.id}.json`), { force: true });
+    } catch (error) {
+      console.error('Pi Swarm could not remove its pending wake:', error.message);
+    }
   }
 }

@@ -20,7 +20,7 @@ const en = {
   installUpdate: 'Install update',
   viewRelease: 'View release',
   copyReleaseLink: 'Copy this release link',
-  confirmInstall: (version: string, boards: number) => `Install v${version}? Reload the plugin manually to apply it.${boards ? ` Reloading will clear ${boards} open ${boards === 1 ? 'board' : 'boards'}.` : ' Reloading clears any open boards.'}`,
+  confirmInstall: (version: string, boards: number) => `Install v${version}? Reload the plugin manually to apply it.${boards ? ` ${boards} open ${boards === 1 ? 'board is' : 'boards are'} saved in plugin data.` : ''}`,
   reloadPlugin: (version: string) => `v${version} is installed. Reload the plugin in Antigravity to apply it.`,
   previousVersionBackup: 'Previous version backup',
   updateMessages: {
@@ -216,7 +216,7 @@ const zh: typeof en = {
   installUpdate: '安装更新',
   viewRelease: '查看发布说明',
   copyReleaseLink: '复制发布链接',
-  confirmInstall: (version, boards) => `安装 v${version}？安装后请手动重载插件。${boards ? ` 重载会清除 ${boards} 个打开的看板。` : ' 重载会清除打开的看板。'}`,
+  confirmInstall: (version, boards) => `安装 v${version}？安装后请手动重载插件。${boards ? ` 已打开的 ${boards} 个看板保存在插件数据目录。` : ''}`,
   reloadPlugin: (version) => `v${version} 已安装。请在 Antigravity 中重载插件生效。`,
   previousVersionBackup: '旧版本备份',
   updateMessages: {

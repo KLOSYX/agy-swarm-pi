@@ -76,6 +76,7 @@ interface BoardMessage {
   time: string;
   kind: 'message' | 'result' | 'error';
   replyTo?: number;
+  pendingHandoff?: { to: string; text: string };
   actualModel?: string;
   logPath?: string;
 }
@@ -483,7 +484,9 @@ function renderMessage(message: BoardMessage): string {
     instruction: labels.userInstruction,
     handoff: labels.handoff,
   };
-  const text = message.text || labels.handoffPosted;
+  const summary = message.text || labels.handoffPosted;
+  const handoff = message.pendingHandoff;
+  const text = handoff ? `${summary}\n\n@${handoff.to} ${handoff.text}` : summary;
   const safeText = escapeHtml(text);
   const time = new Date(message.time);
   return `<li class="board-message message-${tone}" id="board-message-${message.number}" tabindex="-1">
