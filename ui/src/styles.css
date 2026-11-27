@@ -626,7 +626,11 @@ details summary { cursor: pointer; color: var(--info-text); font-size: 12px; }
 
 .output-box.is-danger { color: var(--danger-text); }
 
-.settings-card > h2 { font-size: 14px; }
+.settings-card > h2, .update-card h2 { font-size: 14px; }
+.update-versions { grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr)); }
+.update-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.update-card .callout .update-actions { margin-top: 8px; }
+.update-card code { overflow-wrap: anywhere; }
 .harness-grid, .grid-2, .role-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));

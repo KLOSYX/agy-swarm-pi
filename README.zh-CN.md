@@ -83,6 +83,12 @@ agy plugin install ./agy-swarm-pi
 
 消息板和队列随 MCP 进程存活。插件数据目录保留任务日志、Pi 会话文件和 Codex 会话 ID。Codex 会话正文由其 CLI 保存。Codex 的 JSONL 输出未上报实际模型，面板会单独显示配置模型。
 
+### 从面板更新
+
+在**设置 → 插件更新**点击**检查更新**，对比运行版本与 GitHub 最新稳定版。通过发行包安装的插件可点击**安装更新**并确认。安装会验证发布包的 SHA-256，并保留旧插件目录的备份。有运行或排队任务时，面板会阻止安装。
+
+安装后请在 Antigravity 中手动重载插件。重载会清除打开的看板。插件目录以外的设置和会话数据会保留。从 Git 克隆运行的插件请通过 Git 更新。
+
 ### Antigravity 原生子代理模式（推荐）
 
 `/swarm_pi` 默认通过 `invoke_subagent` 以 `Model="flash_lite"` 为每个可执行的任务启动随插件提供的 `swarm-pi-worker`。协调器启动后结束主对话当前轮次。转发代理通过 `swarm-pi_pi` 跟踪 Pi 或 Codex 任务，在 Antigravity 原生 **Subagents** 列表和聊天中可见。任务完成时，Antigravity 会用完成报告唤醒协调器，主对话无需轮询。转发代理的派发、等待和汇报会消耗宿主模型 token。实际实现和验证由 Pi 或 Codex 执行。[Antigravity 原生子代理文档](https://antigravity.google/docs/subagents/#subagent-lifecycle-and-states)

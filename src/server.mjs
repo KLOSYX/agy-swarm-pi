@@ -24,6 +24,8 @@ import {
 import { SwarmBoards } from './board.mjs';
 import { PiTaskManager, resolvePiExecutable } from './pi-runner.mjs';
 import { resolveCodexExecutable } from './codex-runner.mjs';
+import { PluginUpdates, updateError } from './plugin-updates.mjs';
+import pluginManifest from '../plugin.json' with { type: 'json' };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = process.env.PLUGIN_ROOT || path.resolve(__dirname, '..');
@@ -73,12 +75,12 @@ function errorToolResult(err) {
   };
 }
 
-export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
+export function createSwarmPiServer({ dataDir, uiHtmlPath, pluginRoot = PLUGIN_ROOT, updateFetch } = {}) {
   const resolvedDataDir = dataDir || parseCliArgs(process.argv.slice(2)).dataDir;
   const resolvedUiPath =
     uiHtmlPath ||
     process.env.SWARM_PI_APP_HTML ||
-    path.join(PLUGIN_ROOT, 'ui', 'dist', 'settings.html');
+    path.join(pluginRoot, 'ui', 'dist', 'settings.html');
 
   const settingsStore = new SettingsStore(resolvedDataDir);
   const languagePath = path.join(resolvedDataDir, 'ui-language');
@@ -97,9 +99,14 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
   });
 
   const boards = new SwarmBoards(taskManager, settingsStore);
+  const updates = new PluginUpdates({
+    root: pluginRoot, dataDir: resolvedDataDir, version: pluginManifest.version, fetchRelease: updateFetch,
+    hasActiveWork: () => taskManager.hasActiveWork() || boards.hasActiveWork(),
+    openBoards: () => boards.list().filter((board) => !board.closed).length,
+  });
   const server = new McpServer({
     name: 'swarm-pi',
-    version: '0.4.0',
+    version: pluginManifest.version,
   });
 
   async function buildAppState(extra = {}) {
@@ -110,6 +117,7 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
     ]);
     return {
       language,
+      pluginVersion: pluginManifest.version,
       settings,
       defaults: DEFAULT_SETTINGS,
       thinkingLevels: THINKING_LEVELS,
@@ -376,6 +384,23 @@ export function createSwarmPiServer({ dataDir, uiHtmlPath } = {}) {
       server.registerTool(name, config, call);
     }
   }
+
+  // The App calls these tools only after a click. Expected version and
+  // confirmation prevent installing a different release than the one shown.
+  async function runUpdate(operation) {
+    try {
+      return await operation();
+    } catch (err) {
+      return updateError(err);
+    }
+  }
+
+  boardTool('app_check_update', 'Check the latest published Swarm Pi release on GitHub.', {},
+    () => runUpdate(() => updates.check()), true);
+  boardTool('app_install_update', 'Install the selected Swarm Pi release after confirmation.', {
+    expectedVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+    confirmed: z.literal(true),
+  }, ({ expectedVersion }) => runUpdate(() => updates.install(expectedVersion)), true);
 
   const readBoardShape = { boardId, after: z.number().int().nonnegative().optional() };
   const readAppBoard = ({ boardId, after }) => ({

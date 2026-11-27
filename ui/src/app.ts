@@ -5,6 +5,7 @@ import {
 } from '@modelcontextprotocol/ext-apps';
 import { z } from 'zod/v4';
 import { panelText, thinkingLabel, type Language } from './locale';
+import pluginManifest from '../../plugin.json';
 
 type Harness = 'pi' | 'codex';
 
@@ -115,7 +116,31 @@ interface BoardView extends Board {
   boards?: BoardSummary[];
 }
 
+interface UpdateCheck {
+  currentVersion: string;
+  installedVersion: string;
+  latestVersion: string;
+  releaseUrl: string;
+  available: boolean;
+  pendingReload: boolean;
+  openBoards: number;
+  installBlock: string | null;
+}
+
+interface UpdateFailure {
+  status: 'error';
+  code: string;
+  detail: string;
+}
+
+interface InstalledUpdate {
+  status: 'installed';
+  installedVersion: string;
+  backupPath: string;
+}
+
 interface AppState {
+  pluginVersion?: string;
   language?: Language;
   settings: Settings;
   defaults: Settings;
@@ -138,7 +163,7 @@ interface AppState {
 }
 
 const root = document.getElementById('app') as HTMLElement;
-const app = new App({ name: 'Pi Swarm', version: '0.4.0' }, {});
+const app = new App({ name: 'Pi Swarm', version: pluginManifest.version }, {});
 const harnessName = { pi: 'Pi', codex: 'Codex' };
 const brand = `<svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
   <path d="M8 20.5 16 7l8 13.5M8 20.5h16M16 7v18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
@@ -162,6 +187,12 @@ let state: AppState | null = null;
 let language: Language = 'en';
 let labels = panelText.en;
 let savingLanguage = false;
+let updateCheck: UpdateCheck | null = null;
+let updateFailure: UpdateFailure | null = null;
+let installedUpdate: InstalledUpdate | null = null;
+let updateAction: 'checking' | 'installing' | null = null;
+let confirmUpdate = false;
+let releaseLinkFailed = false;
 
 let draft: Settings | null = null;
 let activeTab: Tab = 'settings';
@@ -835,6 +866,95 @@ function renderHarnessPicker(current: AppState, currentDraft: Settings): string 
   </section>`;
 }
 
+function updateMessage(code: string): string {
+  return Object.hasOwn(labels.updateMessages, code)
+    ? labels.updateMessages[code as keyof typeof labels.updateMessages]
+    : labels.updateMessages.installationFailed;
+}
+
+function renderUpdates(current: AppState): string {
+  const checking = updateAction === 'checking';
+  const installing = updateAction === 'installing';
+  const stagedVersion = installedUpdate?.installedVersion
+    ?? (updateCheck?.pendingReload ? updateCheck.installedVersion : null);
+  const available = updateCheck?.available && !stagedVersion;
+  const block = updateCheck?.installBlock;
+  let feedback = '';
+  if (checking || installing) {
+    feedback = `<p class="hint">${checking ? labels.checkingUpdates : labels.installingUpdate}</p>`;
+  } else if (updateFailure) {
+    feedback = `<p class="callout is-danger" title="${escapeHtml(updateFailure.detail)}">${updateMessage(updateFailure.code)}${updateFailure.code === 'rollbackFailed' ? ` ${escapeHtml(updateFailure.detail)}` : ''}</p>`;
+  } else if (stagedVersion) {
+    feedback = `<p class="callout is-success">${escapeHtml(labels.reloadPlugin(stagedVersion))}</p>`;
+  } else if (updateCheck) {
+    feedback = `<p class="hint">${available ? labels.updateAvailable : labels.upToDate}</p>`;
+  }
+
+  return `<section class="card settings-card update-card" aria-labelledby="plugin-updates-title">
+    <div class="card-header">
+      <h2 id="plugin-updates-title">${labels.pluginUpdates}</h2>
+      <button type="button" class="btn" id="check-updates" ${updateAction ? 'disabled' : ''}>${labels.checkUpdates}</button>
+    </div>
+    <dl class="metadata update-versions">
+      ${metadata(labels.currentVersion, `v${current.pluginVersion || pluginManifest.version}`)}
+      ${updateCheck ? metadata(labels.latestVersion, `v${updateCheck.latestVersion}`) : ''}
+    </dl>
+    <div aria-live="polite">${feedback}</div>
+    ${available && block ? `<p class="hint">${updateMessage(block)}</p>` : ''}
+    ${installedUpdate ? `<p class="hint">${labels.previousVersionBackup} <code>${escapeHtml(installedUpdate.backupPath)}</code></p>` : ''}
+    ${confirmUpdate && updateCheck ? `
+      <div class="callout is-warning">
+        <p>${escapeHtml(labels.confirmInstall(updateCheck.latestVersion, updateCheck.openBoards))}</p>
+        <div class="update-actions">
+          <button type="button" class="btn" id="cancel-update">${labels.cancel}</button>
+          <button type="button" class="btn primary" id="apply-update">${labels.installUpdate}</button>
+        </div>
+      </div>` : ''}
+    ${updateCheck ? `<div class="update-actions">
+      ${available && !block && !confirmUpdate ? `<button type="button" class="btn primary" id="confirm-update" ${updateAction ? 'disabled' : ''}>${labels.installUpdate}</button>` : ''}
+      <button type="button" class="btn" id="release-details">${labels.viewRelease}</button>
+    </div>` : ''}
+    ${releaseLinkFailed && updateCheck ? `<p class="hint">${labels.copyReleaseLink} <code>${escapeHtml(updateCheck.releaseUrl)}</code></p>` : ''}
+  </section>`;
+}
+
+async function runUpdate(action: 'checking' | 'installing') {
+  if (updateAction) return;
+  if (action === 'installing' && (!confirmUpdate || !updateCheck?.available || updateCheck.installBlock)) return;
+  updateAction = action;
+  updateFailure = null;
+  confirmUpdate = false;
+  releaseLinkFailed = false;
+  render();
+  try {
+    const result = await app.callServerTool(action === 'checking'
+      ? { name: 'app_check_update', arguments: {} }
+      : { name: 'app_install_update', arguments: { expectedVersion: updateCheck!.latestVersion, confirmed: true } },
+      { timeout: action === 'checking' ? 15000 : 45000 });
+    if (result.isError || !result.structuredContent) throw new Error('Update tool did not return a result');
+    const payload = result.structuredContent as unknown as UpdateCheck | UpdateFailure | InstalledUpdate;
+    if ('status' in payload && payload.status === 'error') {
+      updateFailure = payload;
+      if (action === 'checking' || ['versionChanged', 'activeWork', 'reloadRequired'].includes(payload.code)) {
+        updateCheck = null;
+      }
+    } else if ('status' in payload) {
+      installedUpdate = payload;
+    } else {
+      updateCheck = payload;
+    }
+  } catch (error) {
+    if (action === 'checking') updateCheck = null;
+    updateFailure = {
+      status: 'error', code: action === 'checking' ? 'checkFailed' : 'installationFailed',
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    updateAction = null;
+    render();
+  }
+}
+
 function renderSettingsTab(current: AppState, currentDraft: Settings): string {
   const models = current.modelsCache.models || [];
   const roleEntries = Object.entries(currentDraft.roles || {});
@@ -847,6 +967,7 @@ function renderSettingsTab(current: AppState, currentDraft: Settings): string {
 
     <h2>${labels.settings}</h2>
     ${renderHarnessPicker(current, currentDraft)}
+    ${renderUpdates(current)}
     <section class="card settings-card">
       <h2>${labels.globalDefaults}</h2>
       <div class="grid-2">
@@ -1186,6 +1307,28 @@ root.addEventListener('click', (event) => {
 });
 
 function bindEvents() {
+  document.getElementById('check-updates')?.addEventListener('click', () => void runUpdate('checking'));
+  document.getElementById('confirm-update')?.addEventListener('click', () => {
+    confirmUpdate = true;
+    render();
+    document.getElementById('cancel-update')?.focus();
+  });
+  document.getElementById('cancel-update')?.addEventListener('click', () => {
+    confirmUpdate = false;
+    render();
+    document.getElementById('confirm-update')?.focus();
+  });
+  document.getElementById('apply-update')?.addEventListener('click', () => void runUpdate('installing'));
+  document.getElementById('release-details')?.addEventListener('click', async () => {
+    const url = updateCheck?.releaseUrl;
+    if (!url) return;
+    try {
+      releaseLinkFailed = Boolean((await app.openLink({ url })).isError);
+    } catch {
+      releaseLinkFailed = true;
+    }
+    if (releaseLinkFailed) render();
+  });
   const languageSelect = document.getElementById('panel-language') as HTMLSelectElement | null;
   languageSelect?.addEventListener('change', () => void changeLanguage(languageSelect));
 

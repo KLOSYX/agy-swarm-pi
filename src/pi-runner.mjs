@@ -327,6 +327,10 @@ export class PiTaskManager {
     await fs.mkdir(path.join(this.dataDir, 'worktrees'), { recursive: true });
   }
 
+  hasActiveWork() {
+    return this.pendingStarts > 0 || [...this.tasks.values()].some((task) => task.status === 'running');
+  }
+
   async updateSettings(input, { fromPanel = false } = {}) {
     if (this.updatingSettings) throw new Error('A settings update is already in progress.');
     this.updatingSettings = true;
@@ -334,8 +338,7 @@ export class PiTaskManager {
       if (!fromPanel) return await this.settingsStore.patch(input);
       const current = await this.settingsStore.load();
       const next = { ...input, harness: input.harness ?? current.harness };
-      if (next.harness !== current.harness &&
-          (this.pendingStarts || [...this.tasks.values()].some((task) => task.status === 'running'))) {
+      if (next.harness !== current.harness && this.hasActiveWork()) {
         throw new Error('Wait for active tasks to finish or cancel them before switching harnesses.');
       }
       return await this.settingsStore.save(next);

@@ -45,6 +45,11 @@ export class SwarmBoards {
     return board;
   }
 
+  hasActiveWork() {
+    return [...this.boards.values()].some((board) => [...board.roster.values()]
+      .some((member) => member.status === 'working' || member.queue.length > 0));
+  }
+
   list() {
     return Array.from(this.boards.values(), ({ id, title, harness, closed }) => ({ id, title, harness, closed })).reverse();
   }

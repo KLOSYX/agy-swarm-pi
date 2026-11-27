@@ -79,6 +79,12 @@ Workers hand off work by including `SWARM_POST @worker message` in their final r
 
 Boards and queues live in the MCP process. The plugin data directory contains task logs, Pi sessions, and Codex session IDs. Codex stores its session transcripts in its own CLI data directory. Codex's JSONL output does not report the actual model, so the panel shows the configured model separately.
 
+### Update from the panel
+
+In **Settings → Plugin updates**, select **Check for updates** to compare the running plugin with the latest stable GitHub release. For an eligible release installation, select **Install update** and confirm. The updater verifies the archive against its SHA-256 file and keeps a backup of the previous plugin directory. Running and queued work blocks installation.
+
+Reload the plugin in Antigravity when you are ready to switch versions. Reloading clears open boards. Settings and session data stored outside the plugin directory are kept. For a Git checkout, use Git to update it.
+
 ### Native Antigravity Subagent Mode (recommended)
 
 By default, `/swarm_pi` uses `invoke_subagent` with `Model="flash_lite"` to launch the bundled `swarm-pi-worker` for each assignment ready to run. The coordinator ends the main turn after launch. Each wrapper monitors its Pi or Codex worker through `swarm-pi_pi`. Antigravity shows the wrapper in its native **Subagents** list and chat, then wakes the coordinator with its completion report. The main conversation uses zero polling. The wrapper adds host-model tokens for dispatching, monitoring, and reporting. Pi or Codex performs all implementation and verification. [Antigravity custom subagents](https://antigravity.google/docs/subagents/#subagent-lifecycle-and-states)
