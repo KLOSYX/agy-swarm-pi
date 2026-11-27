@@ -36,11 +36,11 @@ codex login
 
 ### 方式一：从 GitHub Release 下载零依赖安装包
 
-从 [GitHub Releases](https://github.com/KLOSYX/agy-swarm-pi/releases) 下载对应版本的安装包。以下以 v0.4.1 为例。
+从 [GitHub Releases](https://github.com/KLOSYX/agy-swarm-pi/releases) 下载对应版本的安装包。以下以 v0.4.2 为例。
 
 ```bash
-curl -fsSLO https://github.com/KLOSYX/agy-swarm-pi/releases/download/v0.4.1/swarm-pi-v0.4.1.tar.gz
-tar -xzf swarm-pi-v0.4.1.tar.gz
+curl -fsSLO https://github.com/KLOSYX/agy-swarm-pi/releases/download/v0.4.2/swarm-pi-v0.4.2.tar.gz
+tar -xzf swarm-pi-v0.4.2.tar.gz
 ./swarm-pi/install.sh
 ```
 
