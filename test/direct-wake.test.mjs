@@ -31,7 +31,7 @@ async function until(check, timeout = 5000) {
   assert.fail('Timed out waiting for the coordinator wake');
 }
 
-test('an owned board subscribes at creation and wakes only after the owner stops', { skip: process.platform === 'win32' }, async (t) => {
+test('a late sidecar delivers queued work once after the owner stops', { skip: process.platform === 'win32' }, async (t) => {
   const appData = await mkdtemp(path.join(tmpdir(), 'swarm-direct-wake-'));
   const dataDir = path.join(appData, 'plugin_data', 'swarm-pi');
   const runtimeDir = path.join(appData, 'sidecar_data', 'swarm-pi', 'coordinator', 'data');
@@ -57,14 +57,11 @@ if (!fs.existsSync(${JSON.stringify(failFirst)})) {
   fs.writeFileSync(${JSON.stringify(failFirst)}, '');
   process.exit(1);
 }
-fs.writeFileSync(${JSON.stringify(capture)}, JSON.stringify(process.argv.slice(2)));
+fs.appendFileSync(${JSON.stringify(capture)}, JSON.stringify(process.argv.slice(2)) + '\\n');
 `, { mode: 0o700 });
-  const sidecar = spawn(process.execPath, [path.resolve('sidecars/coordinator/main.mjs')], {
-    env: { ...process.env, ANTIGRAVITY_EXECUTABLE_DATA_DIR: runtimeDir, PATH: `${executableDir}:${process.env.PATH}` },
-    stdio: 'ignore',
-  });
+  let sidecar;
   t.after(async () => {
-    if (sidecar.exitCode === null && sidecar.signalCode === null) {
+    if (sidecar?.exitCode === null && sidecar.signalCode === null) {
       sidecar.kill();
       await new Promise((resolve) => sidecar.once('close', resolve));
     }
@@ -90,13 +87,13 @@ fs.writeFileSync(${JSON.stringify(capture)}, JSON.stringify(process.argv.slice(2
   taskManager.submit = async ({ cwd, label }) => ({ task_id: label, cwd });
   taskManager.waitForCompletion = (id) => new Promise((resolve) => finish.set(id, resolve));
   const coderResult = { status: 'completed', result_text: 'Private worker result' };
-  await until(() => readJson(path.join(directory, 'ready.json')));
-  const { id, coordinatorWakeReady } = await success('pi_create_swarm', {
+  const { id, coordinatorBound, coordinatorWakeReady } = await success('pi_create_swarm', {
     title: 'Direct watch', cwd: appData, hostBinding: binding,
     members: [{ name: 'coder' }, { name: 'verifier' }],
   });
   const pending = path.join(directory, 'pending', `${id}.json`);
-  assert.equal(coordinatorWakeReady, true);
+  assert.equal(coordinatorBound, true);
+  assert.equal(coordinatorWakeReady, false);
   const other = updateBinding(appData, randomUUID(), true, true);
   const denied = await call('pi_swarm_watch', { boardId: id, after: 0, hostBinding: other });
   assert.ok(denied.isError);
@@ -111,6 +108,12 @@ fs.writeFileSync(${JSON.stringify(capture)}, JSON.stringify(process.argv.slice(2
   assert.equal(await readJson(pending), null, 'Routine progress must leave coordinator idle');
   finish.get('verifier')({ ...coderResult, result_text: 'Second private result' });
   await until(async () => (await readJson(pending))?.number === 4);
+  sidecar = spawn(process.execPath, [path.resolve('sidecars/coordinator/main.mjs')], {
+    env: { ...process.env, ANTIGRAVITY_EXECUTABLE_DATA_DIR: runtimeDir, PATH: `${executableDir}:${process.env.PATH}` },
+    stdio: 'ignore',
+  });
+  await until(() => readJson(path.join(directory, 'ready.json')));
+  assert.equal((await success('pi_swarm_read', { boardId: id })).coordinatorWakeReady, true);
   await delay(1250);
   assert.equal(await readFile(failFirst).catch(() => null), null, 'Busy coordinator must have no delivery attempt');
   assert.equal(await readJson(capture), null);
@@ -129,6 +132,9 @@ fs.writeFileSync(${JSON.stringify(capture)}, JSON.stringify(process.argv.slice(2
   assert.ok(args[2].includes(id) && args[2].includes('#4') && !args[2].includes('private'));
   assert.match(args[2], /waitMs=0/);
   await until(async () => (await readJson(cursor))?.sent === 4);
+  writeJsonAtomic(conversation, { ...(await readJson(conversation)), at: Date.now() - 16000 });
+  await delay(1250);
+  assert.deepEqual(await readJson(capture), args, 'The acknowledged cursor must stay silent on later scans');
   await success('pi_swarm_close', { boardId: id });
   assert.equal(await readJson(pending), null);
 });
