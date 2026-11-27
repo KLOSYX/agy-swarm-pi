@@ -60,6 +60,7 @@ test('the release archives and installer include the sidecar and bundled panel',
   for (const entry of [
     skillPath, 'ui/dist/settings.html', 'hooks.json', 'bin/coordinator-files.mjs', 'bin/coordinator-hook.mjs',
     'bin/host-binding.mjs', 'sidecars/coordinator/sidecar.json', 'sidecars/coordinator/main.mjs',
+    'assets/readme-header.en.webp', 'assets/readme-header.zh-CN.webp',
   ]) {
     const expected = await fs.readFile(path.join(root, entry));
     for (const pluginDir of pluginDirs) {

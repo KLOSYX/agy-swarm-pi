@@ -2,9 +2,13 @@
 
 [English](README.md) · 简体中文
 
+![Gemini 协调，GPT 干活。示例展示给项目加搜索时，Swarm Pi 如何把实现、测试和审查分派给不同成员。](assets/readme-header.zh-CN.webp)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-在 **Google Antigravity** 中通过 `/swarm_pi` 直接并发调度 **Pi** 或 **Codex** 执行编码、审查与调研任务。先在设置中选择一个执行器，再通过 **Pi Swarm** 共享消息板查看进度与追加指令。
+在 **Google Antigravity** 中运行 `/swarm_pi`，就能把一项任务拆给多个成员并行处理。选用 **Codex** 时，Gemini 拆任务、派工和跟进，GPT 通过 Codex CLI 实现功能、补测试、审查代码。也可以切换到 **Pi**，使用自己配置的模型服务。
+
+**把 Antigravity 用量留给协调。** 成员执行任务时使用所选 CLI 自己的认证与额度，Antigravity 用量用于 Gemini 的规划、派工和跟进。进度、交接和结果都汇总在同一块看板上。需要并行改代码时，可给成员分配独立的 Git worktree。
 
 ## 特性
 
