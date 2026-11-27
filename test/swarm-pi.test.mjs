@@ -492,6 +492,9 @@ test('the plugin manifest starts the bundled MCP panel directly with Node', asyn
     try {
       await client.connect(transport);
       const tools = (await client.listTools()).tools;
+      const eager = Object.entries(config.tools ?? {}).filter(([, tool]) => tool.eager).map(([name]) => name);
+      assert.deepEqual(eager.sort(), ['open_pi_swarm_settings', 'pi_create_swarm', 'pi_get_settings', 'pi_swarm_post']);
+      assert.ok(eager.every((name) => tools.some((tool) => tool.name === name)));
       const panel = tools.find(({ name }) => name === 'open_pi_swarm_settings');
       assert.ok(panel?._meta?.['com.google.antigravity/ui']?.entrypoints.some(({ type }) => type === 'aux_pane'));
       const app = await client.readResource({ uri: 'ui://swarm-pi/settings.html' });

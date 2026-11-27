@@ -6,7 +6,21 @@
         "${PLUGIN_ROOT}/bin/server.bundle.mjs",
         "--data-dir",
         "${PLUGIN_DATA}"
-      ]
+      ],
+      "tools": {
+        "pi_get_settings": {
+          "eager": true
+        },
+        "pi_create_swarm": {
+          "eager": true
+        },
+        "open_pi_swarm_settings": {
+          "eager": true
+        },
+        "pi_swarm_post": {
+          "eager": true
+        }
+      }
     }
   }
 }

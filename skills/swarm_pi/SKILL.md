@@ -10,11 +10,13 @@ Dispatch through the harness selected by the user in Pi Swarm Settings. Report w
 
 If this turn was started by a Pi Swarm coordinator wake, skip setup and read the board named in the notification. Continue from the message cursor you last handled, paging until you reach the notified message and any newer available posts. Handle each actionable report once. End the turn again if workers are still active.
 
+Use the host's directly registered Swarm Pi MCP tools when present. For a lazy tool, fetch its schema only when the current step needs that tool and its arguments are not already available. Use the runtime result of `pi_get_settings` for availability. Read `native-worker.md` only when preparing a native monitor. Discover board-read, watch, and close tools at the steps that use them.
+
 ## Set up the board
 
 The Pi Swarm side panel shows native-style Subagent cards and a per-worker inspector with the brief, task status, elapsed time, tools, model, worktree, and log path as available.
 
-1. Call `pi_get_settings` and check `settings.harness` and the corresponding `piStatus` or `codexStatus`. If the selected harness is unavailable, report the error and open the settings panel.
+1. Call `pi_get_settings` once before setting up a new board and check `settings.harness` and the corresponding `piStatus` or `codexStatus`. If the selected harness is unavailable, report the error and open the settings panel.
 2. Define named workers and a verifier for code changes. Use `pi_create_swarm` with the absolute project path, title, and each member's name, role, brief, and optional `worktree: true` for independent writers. For Codex, omit the Pi tool allowlist and use a role configured with `workspace-write` for writers. Specify ownership, acceptance checks, and the recipient for each handoff in the briefs. Instruct the verifier to use the sender workspace in its board prompt when reviewing an isolated coder and report findings directly to that coder.
 3. Call `open_pi_swarm_settings(tab="board", boardId=...)` to open the side panel. The server queues worker handoffs automatically, and the user can post follow-ups from the board. A board can dispatch when its original harness is selected in Settings.
 
